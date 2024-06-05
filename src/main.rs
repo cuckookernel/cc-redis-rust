@@ -27,14 +27,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
             },
             Err(e) => println!("couldn't get client: {:?}", e),
         }
-
     }
 }
 
 
 async fn handle_client(stream: &mut TcpStream) -> Result<(), Box<dyn Error>> {
     // let mut input_buffer = Vec::<u8>::with_capacity(128);
-    let mut empty_cnt = 0;
+    // let mut empty_cnt = 0;
 
     loop {
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -49,14 +48,6 @@ async fn handle_client(stream: &mut TcpStream) -> Result<(), Box<dyn Error>> {
         match stream.try_read_buf(&mut input_buffer) {
             Ok(0) => break,
             Ok(_) => {
-                if input_buffer.len() == 0 {
-                    empty_cnt += 1;
-                    if empty_cnt % 100 == 0 {
-                        println!("empty_cnt: {empty_cnt}")
-                    }
-                    continue
-                }
-
                 println!("received {n_bytes}: {msg:?}", n_bytes=input_buffer.len(),
                          msg=dbgu::format_bytes_dbg(&input_buffer));
 
