@@ -1,3 +1,4 @@
+use anyhow::Result;
 use std::fmt::Formatter;
 
 use crate::debug_util::format_bytes_dbg;
@@ -21,6 +22,10 @@ impl Bytes {
 
     pub fn as_vec(&self) -> &Vec<u8> {
         &self.0
+    }
+
+    pub fn to_string(&self) -> Result<String> {
+        Ok(String::from_utf8(self.0.clone())?)
     }
 }
 
