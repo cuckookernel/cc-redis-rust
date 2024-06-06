@@ -6,6 +6,7 @@ use std::io;
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 
+mod common;
 mod cmd_parsing;
 mod cmd_proc;
 mod commands;
@@ -59,8 +60,7 @@ async fn handle_client(stream: &mut TcpStream) {
                     msg = dbgu::format_bytes_dbg(&input_buffer)
                 );
 
-                let mut deser = resp::RespDeserializer::new(input_buffer.clone());
-                let input_val = deser.deserialize();
+                let input_val = resp::deserialize(&input_buffer);
 
                 let output_val = match input_val {
                     Ok(val) => {
@@ -79,7 +79,7 @@ async fn handle_client(stream: &mut TcpStream) {
                 let mut ser = resp::RespSerializer::new();
                 ser.serialize(&output_val).unwrap();
 
-                let write_result = stream.try_write(&ser.get());
+                let write_result = stream.try_write(ser.get());
                 if let Err(err) = write_result {
                     println!("Error when writing: {err:?}");
                     return; // Err(err.into())

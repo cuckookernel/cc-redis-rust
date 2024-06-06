@@ -1,8 +1,10 @@
-#[derive(Debug)]
+use super::common::Bytes;
+
+#[derive(Debug, PartialEq, Eq)]
 pub enum Command {
     Ping,
-    Echo(Vec<u8>),
-    Get(Vec<u8>),
+    Echo(Bytes),
+    Get(Bytes),
     // Coming soon:
     // Set(Vec<u8>, Vec<u8>)
 }
