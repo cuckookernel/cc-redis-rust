@@ -11,7 +11,6 @@ pub fn deser_str(data: &str) -> Result<Value> {
     deser.deserialize()
 }
 
-
 #[test]
 fn parse_simple_str() {
     let input = "+teo\r\n";
@@ -19,7 +18,6 @@ fn parse_simple_str() {
 
     assert_eq!(deser_str(input).unwrap(), expected);
 }
-
 
 #[test]
 fn parse_array_2() {

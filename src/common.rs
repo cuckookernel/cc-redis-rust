@@ -2,7 +2,7 @@ use std::fmt::Formatter;
 
 use crate::debug_util::format_bytes_dbg;
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Bytes(Vec<u8>);
 
 impl Bytes {

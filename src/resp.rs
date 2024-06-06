@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{format_err, Result};
 use std::io;
 use std::io::{BufReader, BufWriter, Cursor, Read, Write};
 
@@ -10,8 +10,14 @@ pub enum Value {
     Array(Vec<Value>),
     BulkString(Bytes),
     SimpleError(String),
+    BulkError(String),
 }
 
+impl Value {
+    pub fn ok() -> Self {
+        Self::SimpleString("OK".into())
+    }
+}
 
 #[allow(dead_code)]
 pub fn s_str(s: &str) -> Value {
@@ -21,6 +27,11 @@ pub fn s_str(s: &str) -> Value {
 #[allow(dead_code)]
 pub fn b_str(s: &str) -> Value {
     Value::BulkString(s.into())
+}
+
+#[allow(dead_code)]
+pub fn s_err(s: &str) -> Value {
+    Value::SimpleError(s.to_string())
 }
 
 pub struct RespSerializer {
@@ -47,11 +58,9 @@ impl RespSerializer {
             }
             Array(elems) => {
                 cnt += self.write_len_line(b'*', elems.len())?;
-                cnt += elems
-                    .iter()
-                    .try_fold(0usize, |acc, elem| {
-                        self.serialize(elem).map(|cnt| acc + cnt)
-                    })?;
+                cnt += elems.iter().try_fold(0usize, |acc, elem| {
+                    self.serialize(elem).map(|cnt| acc + cnt)
+                })?;
             }
             BulkString(v) => {
                 cnt += self.write_len_line(b'$', v.len())?;
@@ -60,6 +69,10 @@ impl RespSerializer {
             SimpleError(msg) => {
                 cnt += self.write(b"-")?;
                 cnt += self.writeln(msg.replace('\r', "\\r").replace('\n', "\\n").as_bytes())?
+            }
+            BulkError(msg) => {
+                cnt += self.write_len_line(b'!', msg.len())?;
+                cnt += self.writeln(msg.as_bytes())?;
             }
         };
         Ok(cnt)
@@ -70,8 +83,7 @@ impl RespSerializer {
     }
 
     pub fn writeln(&mut self, data: &[u8]) -> io::Result<usize> {
-        Ok(self.writer.write(data)?
-           + self.writer.write(b"\r\n")?)
+        Ok(self.writer.write(data)? + self.writer.write(b"\r\n")?)
     }
 
     pub fn write(&mut self, data: &[u8]) -> io::Result<usize> {
@@ -83,7 +95,6 @@ impl RespSerializer {
         self.writeln(format!("{len}").as_bytes())
     }
 }
-
 
 impl Default for RespSerializer {
     fn default() -> Self {
@@ -115,7 +126,6 @@ impl RespDeserializer {
             b'$' => {
                 self.read_until(b'\n', &mut bytes)?;
                 let len = parse_len(&bytes)?;
-                println!("Reading Bulk string of length: {len}");
 
                 let mut bytes_ = vec![0u8; len];
                 self.reader.read_exact(bytes_.as_mut_slice())?;
@@ -174,5 +184,10 @@ pub fn parse_len(bytes: &[u8]) -> Result<usize> {
 
 pub fn deserialize(data: &[u8]) -> Result<Value> {
     let mut deser = RespDeserializer::new(Vec::from(data));
-    deser.deserialize()
+    deser.deserialize().map_err(|err| {
+        format_err!(
+            "Error interpretting byte as Value bytes=`{bytes:?}`, err={err}",
+            bytes = Bytes::from(data)
+        )
+    })
 }
