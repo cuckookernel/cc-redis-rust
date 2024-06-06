@@ -5,13 +5,21 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{resp::Value, Bytes};
 
-struct ValAndExpiry {
+pub struct ValAndExpiry {
     val: Bytes,
-    ex: u64
-};
+    ex: u64, // absolute expiry time in millis since epoch
+}
 
-pub fn non_expiring(val : Bytes) -> ValAndExpiry {
-    ValAndExpiry{val, ex: i64::MAX}
+impl ValAndExpiry {
+    pub fn new(val: Bytes, ex_interv: Option<u64>) -> Self {
+        match ex_interv {
+            Some(interv) => ValAndExpiry {
+                val,
+                ex: now_millis() + interv,
+            },
+            None => ValAndExpiry { val, ex: u64::MAX },
+        }
+    }
 }
 
 pub struct Db {
@@ -19,7 +27,10 @@ pub struct Db {
 }
 
 pub fn now_millis() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).expect("WTF?").as_millis() as u64
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("WTF?")
+        .as_millis() as u64
 }
 
 impl Db {
@@ -34,26 +45,27 @@ impl Db {
         match cmd {
             Ping => SimpleString("PONG".into()),
             Echo(a) => BulkString(a.clone()),
-            SetKV(key, val) => {
-                self.h.insert(key.clone(), non_expiring(val.clone()) );
+            SetKV(key, val, ex) => {
+                self.h
+                    .insert(key.clone(), ValAndExpiry::new(val.clone(), *ex));
                 Value::ok()
             }
             Get(key) => {
-                match self.h.get(&key) {
+                match self.h.get(key) {
                     Some(val_ex) => {
-                        if val_ex.ex > now_millis() { // not yet expired
+                        if val_ex.ex > now_millis() {
+                            // not yet expired
                             BulkString(val_ex.val.clone())
                         } else {
                             NullBulkString
                         }
                     }
-                    None => NullBulkString
+                    None => NullBulkString,
                 }
-            }
-            /* _ => {
-                // SimpleError(format!("Cannot handle cmd yet: {cmd:?}"))
-                panic!("Cannot handle cmd yet: {cmd:?}")
-            } */
+            } /* _ => {
+                    // SimpleError(format!("Cannot handle cmd yet: {cmd:?}"))
+                    panic!("Cannot handle cmd yet: {cmd:?}")
+              } */
         }
     }
 }

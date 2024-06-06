@@ -8,7 +8,7 @@ pub enum Command {
     Ping,
     Echo(Bytes),
     Get(Bytes),
-    SetKV(Bytes, Bytes),
+    SetKV(Bytes, Bytes, Option<u64>),
 }
 
 pub fn parse_cmd(val: &Value) -> Result<Command> {
@@ -42,7 +42,20 @@ pub fn parse_cmd(val: &Value) -> Result<Command> {
                     let word0 = String::from_utf8(v.as_vec().clone())?;
                     match word0.as_str() {
                         "SET" => parse_set(elems),
-                        _ => Err(format_err!("Invalid one argument command: `{word0}`")),
+                        _ => Err(format_err!("Invalid 2 argument command: `{word0}`")),
+                    }
+                }
+
+                (BulkString(v), 5) => {
+                    // all  commands witH one argument parsed here
+                    let word0 = String::from_utf8(v.as_vec().clone())?;
+                    match (word0.as_str(), &elems[1], &elems[2], &elems[3], &elems[4]) {
+                        ("SET", BulkString(k), BulkString(v), BulkString(arg3), Int(ex_int))
+                            if arg3 == &Bytes::from("ex") =>
+                        {
+                            Ok(Command::SetKV(k.clone(), v.clone(), Some(*ex_int as u64)))
+                        }
+                        _ => Err(format_err!("Invalid 4 argument command: `{word0}`")),
                     }
                 }
 
@@ -77,7 +90,7 @@ fn parse_get(elems: &[Value]) -> Result<Command> {
 
 fn parse_set(elems: &[Value]) -> Result<Command> {
     if let (BulkString(k), BulkString(v)) = (&elems[1], &elems[2]) {
-        Ok(Command::SetKV(k.clone(), v.clone()))
+        Ok(Command::SetKV(k.clone(), v.clone(), None))
     } else {
         Err(format_err!(
             "Expected two bulkstrings as arguments for Set: {e:?}",

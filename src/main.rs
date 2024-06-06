@@ -43,7 +43,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 }
 
-
 async fn handle_db_commands(mut rx: Receiver<CmdAndSender>) {
     // long running co-routine that gets commands from only channel and executes them on the Db
     println!("handle_db_commands: Setting up Db object.");
@@ -58,7 +57,7 @@ async fn handle_db_commands(mut rx: Receiver<CmdAndSender>) {
             }
             None => {
                 println!("handle_commands: Incomming command channel closed. STOPPING");
-                break
+                break;
             }
         }
     }
@@ -103,12 +102,11 @@ async fn handle_client(stream: &mut TcpStream, tx: Sender<CmdAndSender>) {
     }
 }
 
-async fn proc_input(input_buffer: &[u8], tx: &Sender<CmdAndSender> ) -> resp::Value {
-
+async fn proc_input(input_buffer: &[u8], tx: &Sender<CmdAndSender>) -> resp::Value {
     let input_val = resp::deserialize(input_buffer);
     let output_res = match input_val {
         Ok(val) => cmd_to_db(&val, tx).await,
-        Err(e) => Err(e)
+        Err(e) => Err(e),
     };
     output_res.unwrap_or_else(|e| resp::Value::BulkError(e.to_string()))
 }
@@ -123,8 +121,8 @@ async fn cmd_to_db(input_val: &resp::Value, sender: &Sender<CmdAndSender>) -> Re
             Ok(val_r.recv().await.unwrap())
         }
         Err(e) => {
-             panic!("parse_cmd failed: {e}");
-             // Err(anyhow::format_err!("parse_cmd failed: {e}")),
+            panic!("parse_cmd failed: {e}");
+            // Err(anyhow::format_err!("parse_cmd failed: {e}")),
         }
     }
 }

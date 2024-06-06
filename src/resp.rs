@@ -128,14 +128,17 @@ impl RespDeserializer {
 
         let one_byte = self.read_one_byte()?;
         match one_byte {
-            b'+' => { // SimpleString
+            b'+' => {
+                // SimpleString
                 self.read_until(b'\n', &mut bytes)?;
                 let len = bytes.len() - 2; // leave out "\r\n"
                 Ok(Value::SimpleString((&bytes[..len]).into()))
             }
             b':' => {
                 self.read_until(b'\n', &mut bytes)?;
-                let i = String::from_utf8(Vec::from(bytes))?.trim_end().parse::<i64>()?;
+                let i = String::from_utf8(bytes)?
+                    .trim_end()
+                    .parse::<i64>()?;
                 Ok(Value::Int(i))
             }
             b'$' => {
