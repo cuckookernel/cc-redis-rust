@@ -6,8 +6,10 @@ use super::common::Bytes;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Value {
+    NullBulkString,
     SimpleString(Bytes),
     Array(Vec<Value>),
+    Int(i64),
     BulkString(Bytes),
     SimpleError(String),
     BulkError(String),
@@ -52,9 +54,17 @@ impl RespSerializer {
         let mut cnt = 0usize; // accumulator count of bytes written
 
         match &value {
+            NullBulkString => {
+                cnt += self.write(b"$")?;
+                cnt += self.writeln("-1".as_bytes())?;
+            }
             SimpleString(v) => {
                 cnt += self.write(b"+")?;
                 cnt += self.writeln(v.as_bytes())?;
+            }
+            Int(i) => {
+                cnt += self.write(b":")?;
+                cnt += self.writeln(format!("{i}").as_bytes())?;
             }
             Array(elems) => {
                 cnt += self.write_len_line(b'*', elems.len())?;
@@ -118,10 +128,15 @@ impl RespDeserializer {
 
         let one_byte = self.read_one_byte()?;
         match one_byte {
-            b'+' => {
+            b'+' => { // SimpleString
                 self.read_until(b'\n', &mut bytes)?;
                 let len = bytes.len() - 2; // leave out "\r\n"
                 Ok(Value::SimpleString((&bytes[..len]).into()))
+            }
+            b':' => {
+                self.read_until(b'\n', &mut bytes)?;
+                let i = String::from_utf8(Vec::from(bytes))?.trim_end().parse::<i64>()?;
+                Ok(Value::Int(i))
             }
             b'$' => {
                 self.read_until(b'\n', &mut bytes)?;
