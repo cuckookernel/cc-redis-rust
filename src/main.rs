@@ -1,15 +1,18 @@
 // Uncomment this block to pass the first stage
 
-use std::io;
-use tokio::net::{TcpListener, TcpStream};
+use cmd_parsing::parse_cmd;
 use std::error::Error;
+use std::io;
 use std::time::Duration;
+use tokio::net::{TcpListener, TcpStream};
 
+mod cmd_parsing;
+mod cmd_proc;
+mod commands;
+mod debug_util;
+mod resp;
 
-pub mod debug_util;
-
-use debug_util as dbgu;
-
+use debug_util::{self as dbgu, peer_addr_str};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -23,16 +26,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         match listener.accept().await {
             Ok((mut stream, addr)) => {
                 println!("Accepted new client: {:?}", addr);
-                tokio::spawn(async move {handle_client(&mut stream).await});
+                tokio::spawn(async move { handle_client(&mut stream).await });
                 println!("After join")
-            },
+            }
             Err(e) => println!("couldn't get client: {:?}", e),
         }
     }
 }
 
-
-async fn handle_client(stream: &mut TcpStream) { // -> Result<(), Box<dyn Error>> {
+async fn handle_client(stream: &mut TcpStream) {
+    // -> Result<(), Box<dyn Error>> {
     // let mut input_buffer = Vec::<u8>::with_capacity(128);
     // let mut empty_cnt = 0;
 
@@ -49,17 +52,38 @@ async fn handle_client(stream: &mut TcpStream) { // -> Result<(), Box<dyn Error>
         match stream.try_read_buf(&mut input_buffer) {
             Ok(0) => break,
             Ok(_) => {
-                println!("received (from {addr}) {n_bytes}: {msg:?}",
-                         addr=stream.peer_addr().map(|a| a.to_string()).unwrap_or("<undefined>".to_string()),
-                         n_bytes=input_buffer.len(),
-                         msg=dbgu::format_bytes_dbg(&input_buffer));
+                println!(
+                    "received (from {addr}) {n_bytes}: {msg:?}",
+                    addr = peer_addr_str(stream),
+                    n_bytes = input_buffer.len(),
+                    msg = dbgu::format_bytes_dbg(&input_buffer)
+                );
 
-                let write_result = stream.try_write("+PONG\r\n".as_bytes());
+                let mut deser = resp::RespDeserializer::new(input_buffer.clone());
+                let input_val = deser.deserialize();
+
+                let output_val = match input_val {
+                    Ok(val) => {
+                        let cmd = parse_cmd(&val);
+                        cmd_proc::process_cmd(&cmd)
+                    }
+                    Err(_e) => {
+                        eprintln!(
+                            "Error interpreting input as utf8, input=`{msg}`",
+                            msg = dbgu::format_bytes_dbg(&input_buffer)
+                        );
+                        return;
+                    }
+                };
+
+                let mut ser = resp::RespSerializer::new();
+                ser.serialize(&output_val).unwrap();
+
+                let write_result = stream.try_write(&ser.get());
                 if let Err(err) = write_result {
                     println!("Error when writing: {err:?}");
-                    return // Err(err.into())
+                    return; // Err(err.into())
                 }
-
             }
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                 continue;
@@ -68,8 +92,6 @@ async fn handle_client(stream: &mut TcpStream) { // -> Result<(), Box<dyn Error>
                 return; //  Err(e.into());
             }
         };
-
     }
     // Ok(())
 }
-
