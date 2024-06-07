@@ -65,7 +65,7 @@ async fn handle_client(stream: &mut TcpStream, tx: Sender<CmdAndSender>) {
                     "handle_client: received input (from {addr}) {n_bytes} bytes:\n{msg:?}",
                     addr = peer_addr_str(stream),
                     n_bytes = input_buffer.len(),
-                    msg = format!("{:?}", input_buffer)
+                    msg = format!("{:?}", Bytes::from(input_buffer.as_slice()))
                 );
 
                 let output_val = proc_input(&input_buffer, &tx).await;
