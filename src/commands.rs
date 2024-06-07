@@ -11,7 +11,7 @@ pub enum Command {
     SetKV(Bytes, Bytes, Option<u64>),
     Info(String),
     ReplConf(String, String),
-    Psync(String, u64),
+    Psync(String, i64),
 }
 
 impl Command {
@@ -31,7 +31,8 @@ impl Command {
             }
             Self::Info(s) => vec!["INFO".into(), s.as_str().into()].into(),
             Self::ReplConf(key, val) => vec!["REPLCONF".into(), key.as_str().into(), val.as_str().into()].into(),
-            Self::Psync(key, val) => vec!["PSYNC".into(), key.as_str().into(), format!("{}", val).as_str().into()].into(),
+            Self::Psync(key, val) => vec!["PSYNC".into(), key.as_str().into(),
+                    format!("{}", val).as_str().into()].into(),
         }
     }
 }

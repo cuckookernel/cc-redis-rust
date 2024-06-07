@@ -82,9 +82,9 @@ impl Db {
         let repl_conf_2_resp = proxy.send_command(repl_conf_2).await?;
         println!("master's response to repl_conf_2: {repl_conf_2_resp:?}");
 
-        let repl_conf_2 = Command::ReplConf("capa".into(), "psync2".into());
-        let repl_conf_2_resp = proxy.send_command(repl_conf_2).await?;
-        println!("master's response to repl_conf_2: {repl_conf_2_resp:?}");
+        let psync = Command::Psync("?".into(),  -1);
+        let psync_resp = proxy.send_command(psync).await?;
+        println!("master's response to psync: {repl_conf_2_resp:?}");
 
         Ok(())
     }
