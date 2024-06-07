@@ -51,7 +51,9 @@ impl Db {
 
         if let Some(master_host_port) = self.cfg.replicaof.clone() {
             println!("Db::run: running replication handshake");
-            self.run_replication_handshake(&master_host_port).await.unwrap();
+            self.run_replication_handshake(&master_host_port)
+                .await
+                .unwrap();
         }
 
         println!("Db::run: Starting loop");
@@ -82,7 +84,7 @@ impl Db {
         let repl_conf_2_resp = proxy.send_command(repl_conf_2).await?;
         println!("master's response to repl_conf_2: {repl_conf_2_resp:?}");
 
-        let psync = Command::Psync("?".into(),  -1);
+        let psync = Command::Psync("?".into(), -1);
         let psync_resp = proxy.send_command(psync).await?;
         println!("master's response to psync: {psync_resp:?}");
 
@@ -98,11 +100,13 @@ impl Db {
             SetKV(key, val, ex) => self.exec_set(key, val, ex),
             Get(key) => self.exec_get(key),
             Info(arg) => self.exec_info(arg),
-            ReplConf(_, _) => {
-                Value::ok()
-            },
+            ReplConf(_, _) => Value::ok(),
+            Psync(id, offset) if id == "?" && *offset == -1 => {
+                let reply_str = format!("FULLRESYNC {repl_id} 0", repl_id = self.replication_id);
+                Value::SimpleString(reply_str.as_bytes().into())
+            }
             Psync(_, _) => {
-                panic!("Received PSYNC which isn't implemented yet!!!")
+                panic!("Can't reply to {cmd:?} yet")
             }
         }
     }
@@ -144,17 +148,17 @@ impl Db {
             _ => Value::NullBulkString,
         }
     }
-
 }
 
 struct ProxyToMaster {
-    stream: TcpStream
+    stream: TcpStream,
 }
 
-impl  ProxyToMaster {
+impl ProxyToMaster {
     async fn new(master_host_port: &str) -> Self {
-        let stream = TcpStream::connect(master_host_port.replace(' ', ":")).await.unwrap();
-        Self{stream}
+        let host_port = master_host_port.replace(' ', ":");
+        let stream = TcpStream::connect(host_port).await.unwrap();
+        Self { stream }
     }
 
     async fn send_command(&mut self, cmd: Command) -> Result<Value> {

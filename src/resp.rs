@@ -1,12 +1,11 @@
 use anyhow::{format_err, Result};
-use tokio::io::AsyncReadExt;
-use tokio::net::TcpStream;
 use std::io;
 use std::io::{BufReader, BufWriter, Cursor, Read, Write};
+use tokio::io::AsyncReadExt;
+use tokio::net::TcpStream;
 
 use crate::common::Bytes;
 use crate::misc_util::peer_addr_str;
-
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Value {
@@ -29,7 +28,9 @@ impl Value {
             Self::NullBulkString => Ok("".into()),
             Self::SimpleString(bs) => bs.to_string(),
             Self::BulkString(bs) => bs.to_string(),
-            _ => Err(format_err!("Value is not convertable to string, self={self:?}"))
+            _ => Err(format_err!(
+                "Value is not convertable to string, self={self:?}"
+            )),
         }
     }
 }
@@ -46,7 +47,6 @@ impl From<&Bytes> for Value {
     }
 }
 
-
 impl From<&[Value]> for Value {
     fn from(v: &[Value]) -> Value {
         let v1: Vec<Value> = v.into();
@@ -59,7 +59,6 @@ impl From<Vec<Value>> for Value {
         Value::Array(v)
     }
 }
-
 
 #[allow(dead_code)]
 pub fn s_str(s: &str) -> Value {
@@ -88,7 +87,6 @@ pub struct RespSerializer {
     // buf: Vec<u8>,
     writer: BufWriter<Vec<u8>>,
 }
-
 
 impl RespSerializer {
     pub fn new() -> Self {
@@ -256,7 +254,6 @@ pub fn deserialize(data: &[u8]) -> Result<Value> {
         )
     })
 }
-
 
 pub async fn get_value_from_stream(stream: &mut TcpStream) -> Result<Value> {
     stream.readable().await?;

@@ -1,6 +1,5 @@
 use anyhow::Result;
 
-
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Bytes(Vec<u8>);
 
@@ -53,7 +52,6 @@ impl std::fmt::Debug for Bytes {
         write!(f, "{}", ret)
     }
 }
-
 
 impl From<Vec<u8>> for Bytes {
     fn from(v: Vec<u8>) -> Self {
