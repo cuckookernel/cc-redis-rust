@@ -12,64 +12,84 @@ pub enum Command {
     Info(String),
 }
 
+impl Command {
+    pub fn to_bulk_array(&self) -> Value {
+        match self {
+            Self::Ping => vec![Value::from("PING")].into(),
+            Self::Echo(bs) => vec!["ECHO".into(), bs.into()].into(),
+            Self::Get(bs) => vec!["GET".into(), bs.into()].into(),
+            Self::SetKV(kbs, vbs, ex) => {
+                match ex {
+                    None => vec!["SET".into(), kbs.into(), vbs.into()].into(),
+                    Some(ex) => {
+                        let ex_str = format!("{}", ex);
+                        vec!["SET".into(), kbs.into(), vbs.into(), "px".into(), ex_str.as_str().into()].into()
+                    }
+                }
+            }
+            Self::Info(s) => vec!["INGO".into(), s.as_str().into()].into(),
+        }
+    }
+}
+
 pub fn parse_cmd(val: &Value) -> Result<Command> {
     use Value::*;
 
     match val {
         Array(elems) if !elems.is_empty() => {
             let n_elems = elems.len();
-            match (&elems[0], n_elems) {
-                (BulkString(bs), 1) => {
-                    // all  commands witH one argument parsed here
-                    let word0 = bs.to_string()?;
-                    match word0.as_str() {
-                        "PING" => Ok(Command::Ping),
-                        _ => Err(format_err!("Invalid one argument command: `{word0}`")),
-                    }
-                }
 
-                (BulkString(bs), 2) => {
-                    // all  commands witH one argument parsed here
-                    let word0 = bs.to_string()?;
-                    match word0.as_str() {
-                        "ECHO" => parse_echo(elems),
-                        "GET" => parse_get(elems),
-                        "INFO" => parse_info(elems),
-                        _ => Err(format_err!("Invalid one argument command: `{word0}`")),
-                    }
-                }
+            if let BulkString(bs) = &elems[0] {
+                let word0 = bs.to_string()?;
 
-                (BulkString(bs), 3) => {
-                    // all  commands witH one argument parsed here
-                    let word0 = bs.to_string()?;
-                    match word0.as_str() {
-                        "SET" => parse_set(elems),
-                        _ => Err(format_err!("Invalid 2 argument command: `{word0}`")),
-                    }
-                }
-
-                (BulkString(bs), 5) => {
-                    // all  commands witH one argument parsed here
-                    let word0 = bs.to_string()?;
-                    match (word0.as_str(), &elems[1], &elems[2], &elems[3], &elems[4]) {
-                        (
-                            "SET",
-                            BulkString(k),
-                            BulkString(v),
-                            BulkString(arg3),
-                            BulkString(ex_str),
-                        ) if arg3 == &Bytes::from("px") => {
-                            let ex_int = ex_str.to_string()?.parse::<i64>()?;
-
-                            Ok(Command::SetKV(k.clone(), v.clone(), Some(ex_int as u64)))
+                match n_elems {
+                    1 => {
+                        // all  commands witH one argument parsed here
+                        match word0.as_str() {
+                            "PING" => Ok(Command::Ping),
+                            _ => Err(format_err!("Invalid one argument command: `{word0}`")),
                         }
-                        _ => Err(format_err!(
-                            "Invalid 4 argument command: `{word0}`\nelems={elems:?}"
-                        )),
                     }
+                    2 => {
+                        // all  commands witH one argument parsed here
+                        match word0.as_str() {
+                            "ECHO" => parse_echo(elems),
+                            "GET" => parse_get(elems),
+                            "INFO" => parse_info(elems),
+                            _ => Err(format_err!("Invalid one argument command: `{word0}`")),
+                        }
+                    }
+                    3 => {
+                        // all  commands witH one argument parsed here
+                        match word0.as_str() {
+                            "SET" => parse_set(elems),
+                            _ => Err(format_err!("Invalid 2 argument command: `{word0}`")),
+                        }
+                    }
+                    5 => {
+                        // all  commands witH one argument parsed here
+                        match (word0.as_str(), &elems[1], &elems[2], &elems[3], &elems[4]) {
+                            (
+                                "SET",
+                                BulkString(k),
+                                BulkString(v),
+                                BulkString(arg3),
+                                BulkString(ex_str),
+                            ) if arg3 == &Bytes::from("px") => {
+                                let ex_int = ex_str.to_string()?.parse::<i64>()?;
+
+                                Ok(Command::SetKV(k.clone(), v.clone(), Some(ex_int as u64)))
+                            }
+                            _ => Err(format_err!(
+                                "Invalid 4 argument command: `{word0}`\nelems={elems:?}"
+                            )),
+                        }
+                    }
+                    _ => Err(format_err!("Unexpected number of elems: {n_elems}, {elems:?}")),
                 }
 
-                _ => Err(format_err!("Unexpected elems[0]={e:?}", e = elems[0])),
+            } else {
+                Err(format_err!("Unexpected elems[0]={e:?}", e = elems[0]))
             }
         }
 

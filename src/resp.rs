@@ -21,6 +21,33 @@ impl Value {
     }
 }
 
+impl From<&str> for Value {
+    fn from(s: &str) -> Self {
+        Value::BulkString(s.into())
+    }
+}
+
+impl From<&Bytes> for Value {
+    fn from(s: &Bytes) -> Self {
+        Value::BulkString(s.clone())
+    }
+}
+
+
+impl From<&[Value]> for Value {
+    fn from(v: &[Value]) -> Value {
+        let v1: Vec<Value> = v.into();
+        Value::Array(v1)
+    }
+}
+
+impl From<Vec<Value>> for Value {
+    fn from(v: Vec<Value>) -> Value {
+        Value::Array(v)
+    }
+}
+
+
 #[allow(dead_code)]
 pub fn s_str(s: &str) -> Value {
     Value::SimpleString(s.into())
@@ -36,10 +63,19 @@ pub fn s_err(s: &str) -> Value {
     Value::SimpleError(s.to_string())
 }
 
+// Serialization
+
+pub fn serialize(value: &Value) -> Result<Bytes> {
+    let mut serializer = RespSerializer::default();
+    serializer.serialize(value)?;
+    Ok(serializer.get().into())
+}
+
 pub struct RespSerializer {
     // buf: Vec<u8>,
     writer: BufWriter<Vec<u8>>,
 }
+
 
 impl RespSerializer {
     pub fn new() -> Self {

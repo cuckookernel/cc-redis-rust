@@ -18,9 +18,9 @@ impl std::fmt::Display for Role {
 
 #[derive(Debug, Clone)]
 pub struct InstanceConfig {
-    port: u32,
-    role: Role,
-    replicaof: Option<String>,
+    pub port: u32,
+    pub role: Role,
+    pub replicaof: Option<String>,
 }
 
 impl Default for InstanceConfig {

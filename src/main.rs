@@ -12,6 +12,7 @@ mod common;
 mod config;
 mod db;
 mod debug_util;
+mod misc_util;
 mod resp;
 
 use commands::{parse_cmd, Command};

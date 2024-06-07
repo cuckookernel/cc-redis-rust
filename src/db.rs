@@ -1,12 +1,15 @@
+use std::collections::HashMap;
+
+use anyhow::Result;
+use tokio::io::AsyncWriteExt;
+use tokio::net::TcpStream;
+use tokio::sync::mpsc::Receiver;
+
 use crate::commands::Command;
 use crate::config::InstanceConfig;
-use crate::{resp, Bytes, CmdAndSender};
-use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use mpsc::Receiver;
-use resp::Value;
-use tokio::sync::mpsc;
+use crate::misc_util::{make_replication_id, now_millis};
+use crate::resp::{serialize, Value};
+use crate::{Bytes, CmdAndSender};
 
 pub struct ValAndExpiry {
     val: Bytes,
@@ -32,23 +35,6 @@ pub struct Db {
     replication_offset: usize,
 }
 
-pub fn now_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("WTF?")
-        .as_millis() as u64
-}
-
-const A_LARGE_PRIME: u64 = 2147483647;
-
-pub fn make_replication_id(seed: u64) -> String {
-    let rep_id_u64_p1 = seed.wrapping_mul(A_LARGE_PRIME);
-    let rep_id_u64_p2 = rep_id_u64_p1.wrapping_add(A_LARGE_PRIME);
-    let rep_id_hex = format!("{rep_id_u64_p1:x}{rep_id_u64_p2:x}");
-    let replication_id = &rep_id_hex.as_bytes()[..20];
-    String::from_utf8(replication_id.into()).unwrap()
-}
-
 impl Db {
     pub fn new(cfg: InstanceConfig) -> Self {
         Db {
@@ -61,7 +47,13 @@ impl Db {
 
     pub async fn run(mut self, mut rx: Receiver<CmdAndSender>) {
         // long running co-routine that gets commands from only channel and executes them on the Db
-        println!("handle_db_commands: Starting loop");
+
+        if let Some(master_host_port) = self.cfg.replicaof.clone() {
+            println!("Db::run: running replication protocol");
+            self.run_replication_protocol(&master_host_port).await.unwrap();
+        }
+
+        println!("Db::run: Starting loop");
         loop {
             match rx.recv().await {
                 Some((cmd, sx)) => {
@@ -76,49 +68,82 @@ impl Db {
         }
     }
 
+    pub async fn run_replication_protocol(&mut self, master_host_port: &str) -> Result<()> {
+        let mut proxy = ProxyToMaster::new(master_host_port).await;
+        proxy.send_command(Command::Ping).await?;
+
+        Ok(())
+    }
+
     pub fn execute(&mut self, cmd: &Command) -> Value {
-        use resp::Value::*;
         use Command::*;
 
         match cmd {
-            Ping => SimpleString("PONG".into()),
-            Echo(a) => BulkString(a.clone()),
-            SetKV(key, val, ex) => {
-                self.h
-                    .insert(key.clone(), ValAndExpiry::new(val.clone(), *ex));
-                Value::ok()
-            }
-            Get(key) => {
-                match self.h.get(key) {
-                    Some(val_ex) => {
-                        if val_ex.ex > now_millis() {
-                            // not yet expired
-                            BulkString(val_ex.val.clone())
-                        } else {
-                            NullBulkString
-                        }
-                    }
-                    None => NullBulkString,
-                }
-            }
-            Info(arg) => match arg.as_str() {
-                "replication" => {
-                    let parts = [
-                        format!("role:{role}", role = self.cfg.role()),
-                        format!("master_replid:{replid}", replid = self.replication_id),
-                        format!(
-                            "master_repl_offset:{offset}",
-                            offset = self.replication_offset
-                        ),
-                    ];
-
-                    BulkString(parts.join("\r\n").as_str().into())
-                }
-                _ => NullBulkString,
-            }, /* _ => {
-                     // SimpleError(format!("Cannot handle cmd yet: {cmd:?}"))
-                     panic!("Cannot handle cmd yet: {cmd:?}")
-               } */
+            Ping => Value::SimpleString("PONG".into()),
+            Echo(a) => Value::BulkString(a.clone()),
+            SetKV(key, val, ex) => self.exec_set(key, val, ex),
+            Get(key) => self.exec_get(key),
+            Info(arg) => self.exec_info(arg),
         }
+    }
+
+    pub fn exec_set(&mut self, key: &Bytes, val: &Bytes, ex: &Option<u64>) -> Value {
+        self.h
+            .insert(key.clone(), ValAndExpiry::new(val.clone(), *ex));
+        Value::ok()
+    }
+
+    pub fn exec_get(&self, key: &Bytes) -> Value {
+        match self.h.get(key) {
+            Some(val_ex) => {
+                if val_ex.ex > now_millis() {
+                    // not yet expired
+                    Value::BulkString(val_ex.val.clone())
+                } else {
+                    Value::NullBulkString
+                }
+            }
+            None => Value::NullBulkString,
+        }
+    }
+
+    pub fn exec_info(&self, arg: &str) -> Value {
+        match arg {
+            "replication" => {
+                let parts = [
+                    format!("role:{role}", role = self.cfg.role()),
+                    format!("master_replid:{replid}", replid = self.replication_id),
+                    format!(
+                        "master_repl_offset:{offset}",
+                        offset = self.replication_offset
+                    ),
+                ];
+
+                Value::BulkString(parts.join("\r\n").as_str().into())
+            }
+            _ => Value::NullBulkString,
+        }
+    }
+
+}
+
+struct ProxyToMaster {
+    stream: TcpStream
+}
+
+impl  ProxyToMaster {
+    async fn new(master_host_port: &str) -> Self {
+        let stream = TcpStream::connect(master_host_port.replace(' ', ":")).await.unwrap();
+        Self{stream}
+    }
+
+    async fn send_command(&mut self, cmd: Command) -> Result<Value> {
+        println!("ProxyToMaster::send_command: {cmd:?}");
+
+        let cmd_as_value = cmd.to_bulk_array();
+        let serialized = serialize(&cmd_as_value)?;
+        self.stream.write_all(serialized.as_bytes()).await?;
+
+        Ok(Value::ok())
     }
 }
