@@ -84,7 +84,7 @@ impl Db {
 
         let psync = Command::Psync("?".into(),  -1);
         let psync_resp = proxy.send_command(psync).await?;
-        println!("master's response to psync: {repl_conf_2_resp:?}");
+        println!("master's response to psync: {psync_resp:?}");
 
         Ok(())
     }
@@ -99,7 +99,7 @@ impl Db {
             Get(key) => self.exec_get(key),
             Info(arg) => self.exec_info(arg),
             ReplConf(_, _) => {
-                panic!("Received REPLCONF which isn't implemented yet!!!")
+                Value::ok()
             },
             Psync(_, _) => {
                 panic!("Received PSYNC which isn't implemented yet!!!")
@@ -163,6 +163,6 @@ impl  ProxyToMaster {
         let cmd_as_value = cmd.to_bulk_array();
         let serialized = serialize(&cmd_as_value)?;
         self.stream.write_all(serialized.as_bytes()).await?;
-        Ok(get_value_from_stream(&mut self.stream).await?)
+        get_value_from_stream(&mut self.stream).await
     }
 }

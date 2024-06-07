@@ -68,6 +68,7 @@ pub fn parse_cmd(val: &Value) -> Result<Command> {
                         // all  commands witH one argument parsed here
                         match word0.as_str() {
                             "SET" => parse_set(elems),
+                            "REPLCONF" => Ok(Command::ReplConf(elems[1].try_to_string()?, elems[2].try_to_string()?)),
                             _ => Err(format_err!("Invalid 2 argument command: `{word0}`")),
                         }
                     }
