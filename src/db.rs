@@ -82,6 +82,10 @@ impl Db {
         let repl_conf_2_resp = proxy.send_command(repl_conf_2).await?;
         println!("master's response to repl_conf_2: {repl_conf_2_resp:?}");
 
+        let repl_conf_2 = Command::ReplConf("capa".into(), "psync2".into());
+        let repl_conf_2_resp = proxy.send_command(repl_conf_2).await?;
+        println!("master's response to repl_conf_2: {repl_conf_2_resp:?}");
+
         Ok(())
     }
 
@@ -95,7 +99,10 @@ impl Db {
             Get(key) => self.exec_get(key),
             Info(arg) => self.exec_info(arg),
             ReplConf(_, _) => {
-                panic!("Received ReplConf which isn't implemented yet!!!")
+                panic!("Received REPLCONF which isn't implemented yet!!!")
+            },
+            Psync(_, _) => {
+                panic!("Received PSYNC which isn't implemented yet!!!")
             }
         }
     }
