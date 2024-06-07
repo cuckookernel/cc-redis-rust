@@ -26,6 +26,7 @@ type CmdAndSender = (Command, Sender<resp::Value>);
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let config = InstanceConfig::from_command_args();
+    println!("Config from args: {config:?}");
     let port = config.port();
 
     println!("Logs from your program will appear here!");
