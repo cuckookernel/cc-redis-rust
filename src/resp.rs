@@ -136,9 +136,7 @@ impl RespDeserializer {
             }
             b':' => {
                 self.read_until(b'\n', &mut bytes)?;
-                let i = String::from_utf8(bytes)?
-                    .trim_end()
-                    .parse::<i64>()?;
+                let i = String::from_utf8(bytes)?.trim_end().parse::<i64>()?;
                 Ok(Value::Int(i))
             }
             b'$' => {

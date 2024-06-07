@@ -9,7 +9,7 @@ pub enum Command {
     Echo(Bytes),
     Get(Bytes),
     SetKV(Bytes, Bytes, Option<u64>),
-    Info(String)
+    Info(String),
 }
 
 pub fn parse_cmd(val: &Value) -> Result<Command> {
@@ -52,15 +52,20 @@ pub fn parse_cmd(val: &Value) -> Result<Command> {
                     // all  commands witH one argument parsed here
                     let word0 = bs.to_string()?;
                     match (word0.as_str(), &elems[1], &elems[2], &elems[3], &elems[4]) {
-                        ("SET", BulkString(k), BulkString(v), BulkString(arg3),
-                            BulkString(ex_str))
-                            if arg3 == &Bytes::from("px") =>
-                        {
+                        (
+                            "SET",
+                            BulkString(k),
+                            BulkString(v),
+                            BulkString(arg3),
+                            BulkString(ex_str),
+                        ) if arg3 == &Bytes::from("px") => {
                             let ex_int = ex_str.to_string()?.parse::<i64>()?;
 
                             Ok(Command::SetKV(k.clone(), v.clone(), Some(ex_int as u64)))
                         }
-                        _ => Err(format_err!("Invalid 4 argument command: `{word0}`\nelems={elems:?}")),
+                        _ => Err(format_err!(
+                            "Invalid 4 argument command: `{word0}`\nelems={elems:?}"
+                        )),
                     }
                 }
 
@@ -104,13 +109,15 @@ fn parse_set(elems: &[Value]) -> Result<Command> {
     }
 }
 
-
 fn parse_info(elems: &[Value]) -> Result<Command> {
     match &elems[1] {
         BulkString(bs) => {
             let arg1 = bs.to_string()?;
             Ok(Command::Info(arg1))
         }
-        _ => Err(format_err!("Invalid argument for INFO command {e:?}", e = elems[1])),
+        _ => Err(format_err!(
+            "Invalid argument for INFO command {e:?}",
+            e = elems[1]
+        )),
     }
 }

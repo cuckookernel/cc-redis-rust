@@ -1,5 +1,6 @@
 // Uncomment this block to pass the first stage
 use anyhow::Result;
+
 use mpsc::{Receiver, Sender};
 use std::error::Error;
 use std::io;
@@ -21,8 +22,6 @@ use debug_util::{self as dbgu, peer_addr_str};
 
 type CmdAndSender = (Command, Sender<resp::Value>);
 
-
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let config = InstanceConfig::from_command_args();
@@ -34,7 +33,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Channel for commands directed at Db
     let (tx, rx): (Sender<CmdAndSender>, Receiver<CmdAndSender>) = mpsc::channel(100);
 
-    tokio::spawn(async move { handle_db_commands(rx, config).await });
+    println!("main: Setting up Db object.");
+    let db = Db::new(config);
+    tokio::spawn(async move { db.run(rx).await });
 
     let listener = TcpListener::bind(format!("127.0.0.1:{port}")).await?;
     println!("\nOpened Listener");
@@ -46,29 +47,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 tokio::spawn(async move { handle_client(&mut stream, tx1).await });
             }
             Err(e) => println!("couldn't get client: {:?}", e),
-        }
-    }
-}
-
-async fn handle_db_commands(
-    mut rx: Receiver<CmdAndSender>,
-    cfg: InstanceConfig
-) {
-    // long running co-routine that gets commands from only channel and executes them on the Db
-    println!("handle_db_commands: Setting up Db object.");
-    let mut db = Db::new(cfg);
-
-    println!("handle_db_commands: Starting loop");
-    loop {
-        match rx.recv().await {
-            Some((cmd, sx)) => {
-                let resp_val = db.execute(&cmd);
-                sx.send(resp_val).await.unwrap()
-            }
-            None => {
-                println!("handle_commands: Incomming command channel closed. STOPPING");
-                break;
-            }
         }
     }
 }
