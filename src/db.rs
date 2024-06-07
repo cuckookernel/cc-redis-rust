@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
+
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::Receiver;
@@ -8,7 +9,7 @@ use tokio::sync::mpsc::Receiver;
 use crate::commands::Command;
 use crate::config::InstanceConfig;
 use crate::misc_util::{make_replication_id, now_millis};
-use crate::resp::{serialize, Value};
+use crate::resp::{get_value_from_stream, serialize, Value};
 use crate::{Bytes, CmdAndSender};
 
 pub struct ValAndExpiry {
@@ -49,8 +50,8 @@ impl Db {
         // long running co-routine that gets commands from only channel and executes them on the Db
 
         if let Some(master_host_port) = self.cfg.replicaof.clone() {
-            println!("Db::run: running replication protocol");
-            self.run_replication_protocol(&master_host_port).await.unwrap();
+            println!("Db::run: running replication handshake");
+            self.run_replication_handshake(&master_host_port).await.unwrap();
         }
 
         println!("Db::run: Starting loop");
@@ -68,9 +69,18 @@ impl Db {
         }
     }
 
-    pub async fn run_replication_protocol(&mut self, master_host_port: &str) -> Result<()> {
+    pub async fn run_replication_handshake(&mut self, master_host_port: &str) -> Result<()> {
         let mut proxy = ProxyToMaster::new(master_host_port).await;
-        proxy.send_command(Command::Ping).await?;
+        let ping_resp = proxy.send_command(Command::Ping).await?;
+        println!("master's response to ping: {ping_resp:?}");
+
+        let repl_conf_1 = Command::ReplConf("listening-port".into(), format!("{}", self.cfg.port));
+        let repl_conf_1_resp = proxy.send_command(repl_conf_1).await?;
+        println!("master's response to repl_conf_1: {repl_conf_1_resp:?}");
+
+        let repl_conf_2 = Command::ReplConf("capa".into(), "psync2".into());
+        let repl_conf_2_resp = proxy.send_command(repl_conf_2).await?;
+        println!("master's response to repl_conf_2: {repl_conf_2_resp:?}");
 
         Ok(())
     }
@@ -84,6 +94,9 @@ impl Db {
             SetKV(key, val, ex) => self.exec_set(key, val, ex),
             Get(key) => self.exec_get(key),
             Info(arg) => self.exec_info(arg),
+            ReplConf(_, _) => {
+                panic!("Received ReplConf which isn't implemented yet!!!")
+            }
         }
     }
 
@@ -143,7 +156,6 @@ impl  ProxyToMaster {
         let cmd_as_value = cmd.to_bulk_array();
         let serialized = serialize(&cmd_as_value)?;
         self.stream.write_all(serialized.as_bytes()).await?;
-
-        Ok(Value::ok())
+        Ok(get_value_from_stream(&mut self.stream).await?)
     }
 }

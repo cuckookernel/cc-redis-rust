@@ -11,7 +11,6 @@ mod commands;
 mod common;
 mod config;
 mod db;
-mod debug_util;
 mod misc_util;
 mod resp;
 
@@ -19,7 +18,7 @@ use commands::{parse_cmd, Command};
 use common::Bytes;
 use config::InstanceConfig;
 use db::Db;
-use debug_util::{self as dbgu, peer_addr_str};
+use misc_util::peer_addr_str;
 
 type CmdAndSender = (Command, Sender<resp::Value>);
 
@@ -66,7 +65,7 @@ async fn handle_client(stream: &mut TcpStream, tx: Sender<CmdAndSender>) {
                     "handle_client: received input (from {addr}) {n_bytes} bytes:\n{msg:?}",
                     addr = peer_addr_str(stream),
                     n_bytes = input_buffer.len(),
-                    msg = dbgu::format_bytes_dbg(&input_buffer)
+                    msg = format!("{:?}", input_buffer)
                 );
 
                 let output_val = proc_input(&input_buffer, &tx).await;

@@ -10,6 +10,7 @@ pub enum Command {
     Get(Bytes),
     SetKV(Bytes, Bytes, Option<u64>),
     Info(String),
+    ReplConf(String, String),
 }
 
 impl Command {
@@ -27,7 +28,8 @@ impl Command {
                     }
                 }
             }
-            Self::Info(s) => vec!["INGO".into(), s.as_str().into()].into(),
+            Self::Info(s) => vec!["INFO".into(), s.as_str().into()].into(),
+            Self::ReplConf(key, val) => vec!["REPLCONF".into(), key.as_str().into(), val.as_str().into()].into(),
         }
     }
 }

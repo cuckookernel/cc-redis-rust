@@ -1,8 +1,12 @@
 use anyhow::{format_err, Result};
+use tokio::io::AsyncReadExt;
+use tokio::net::TcpStream;
 use std::io;
 use std::io::{BufReader, BufWriter, Cursor, Read, Write};
 
-use super::common::Bytes;
+use crate::common::Bytes;
+use crate::misc_util::peer_addr_str;
+
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Value {
@@ -242,4 +246,22 @@ pub fn deserialize(data: &[u8]) -> Result<Value> {
             bytes = Bytes::from(data)
         )
     })
+}
+
+
+pub async fn get_value_from_stream(stream: &mut TcpStream) -> Result<Value> {
+    stream.readable().await?;
+
+    let mut input_buffer = Vec::with_capacity(4096);
+    let bytes_read = stream.read_buf(&mut input_buffer).await?;
+
+    println!(
+        "get_value_from_stream: received (from {addr}) {n_bytes} (={bytes_read}?) bytes:\n{msg:?}",
+        addr = peer_addr_str(stream),
+        n_bytes = input_buffer.len(),
+        msg = format!("{:?}", Bytes::from(input_buffer.as_slice()))
+    );
+
+    let mut deser = RespDeserializer::new(input_buffer);
+    deser.deserialize()
 }
