@@ -9,6 +9,7 @@ pub enum Command {
     Echo(Bytes),
     Get(Bytes),
     SetKV(Bytes, Bytes, Option<u64>),
+    Info(String)
 }
 
 pub fn parse_cmd(val: &Value) -> Result<Command> {
@@ -33,6 +34,7 @@ pub fn parse_cmd(val: &Value) -> Result<Command> {
                     match word0.as_str() {
                         "ECHO" => parse_echo(elems),
                         "GET" => parse_get(elems),
+                        "INFO" => parse_info(elems),
                         _ => Err(format_err!("Invalid one argument command: `{word0}`")),
                     }
                 }
@@ -80,7 +82,7 @@ pub fn parse_cmd(val: &Value) -> Result<Command> {
 fn parse_echo(elems: &[Value]) -> Result<Command> {
     match &elems[1] {
         BulkString(bs) => Ok(Command::Echo(bs.clone())),
-        _ => Err(format_err!("Invalid argument for echo {e:?}", e = elems[1])),
+        _ => Err(format_err!("Invalid argument for ECHO {e:?}", e = elems[1])),
     }
 }
 
@@ -99,5 +101,16 @@ fn parse_set(elems: &[Value]) -> Result<Command> {
             "Expected two bulkstrings as arguments for Set: {e:?}",
             e = &elems[1..]
         ))
+    }
+}
+
+
+fn parse_info(elems: &[Value]) -> Result<Command> {
+    match &elems[1] {
+        BulkString(bs) => {
+            let arg1 = bs.to_string()?;
+            Ok(Command::Info(arg1))
+        }
+        _ => Err(format_err!("Invalid argument for INFO command {e:?}", e = elems[1])),
     }
 }

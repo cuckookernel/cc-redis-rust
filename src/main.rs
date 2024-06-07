@@ -1,6 +1,4 @@
 // Uncomment this block to pass the first stage
-
-use std::env::args;
 use anyhow::Result;
 use mpsc::{Receiver, Sender};
 use std::error::Error;
@@ -10,57 +8,34 @@ use tokio::sync::mpsc;
 
 mod commands;
 mod common;
+mod config;
 mod db;
 mod debug_util;
 mod resp;
 
 use commands::{parse_cmd, Command};
 use common::Bytes;
+use config::InstanceConfig;
 use db::Db;
 use debug_util::{self as dbgu, peer_addr_str};
 
 type CmdAndSender = (Command, Sender<resp::Value>);
 
 
-struct InstanceConfig {
-    port: u32
-}
-
-impl Default for InstanceConfig {
-    fn default() -> Self {
-        InstanceConfig{port:6379}
-    }
-}
-
-impl InstanceConfig {
-    fn from_command_args() -> Self {
-        let mut output = InstanceConfig{port: 6379};
-        let args = args().into_iter().collect::<Vec<_>>();
-        args.iter().enumerate().for_each( |(i, arg)| {
-            match arg.as_str() {
-                "--port" => output.port = args[i + 1].parse::<u32>().unwrap(),
-                _ => {}
-            }
-        });
-
-        output
-    }
-}
-
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let config = InstanceConfig::from_command_args();
-
+    let port = config.port();
 
     println!("Logs from your program will appear here!");
 
     // Channel for commands directed at Db
     let (tx, rx): (Sender<CmdAndSender>, Receiver<CmdAndSender>) = mpsc::channel(100);
 
-    tokio::spawn(async move { handle_db_commands(rx).await });
+    tokio::spawn(async move { handle_db_commands(rx, config).await });
 
-    let listener = TcpListener::bind(format!("127.0.0.1:{port}", port=config.port)).await?;
+    let listener = TcpListener::bind(format!("127.0.0.1:{port}")).await?;
     println!("\nOpened Listener");
     loop {
         match listener.accept().await {
@@ -74,10 +49,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 }
 
-async fn handle_db_commands(mut rx: Receiver<CmdAndSender>) {
+async fn handle_db_commands(
+    mut rx: Receiver<CmdAndSender>,
+    cfg: InstanceConfig
+) {
     // long running co-routine that gets commands from only channel and executes them on the Db
     println!("handle_db_commands: Setting up Db object.");
-    let mut db = Db::new();
+    let mut db = Db::new(cfg);
 
     println!("handle_db_commands: Starting loop");
     loop {

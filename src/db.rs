@@ -1,4 +1,5 @@
 use crate::commands::Command;
+use crate::config::InstanceConfig;
 use crate::resp;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -24,6 +25,7 @@ impl ValAndExpiry {
 
 pub struct Db {
     h: HashMap<Bytes, ValAndExpiry>,
+    cfg: InstanceConfig,
 }
 
 pub fn now_millis() -> u64 {
@@ -34,8 +36,8 @@ pub fn now_millis() -> u64 {
 }
 
 impl Db {
-    pub fn new() -> Self {
-        Db { h: HashMap::new() }
+    pub fn new(cfg: InstanceConfig) -> Self {
+        Db { h: HashMap::new(), cfg}
     }
 
     pub fn execute(&mut self, cmd: &Command) -> Value {
@@ -62,7 +64,16 @@ impl Db {
                     }
                     None => NullBulkString,
                 }
-            } /* _ => {
+            }
+            Info(arg) => {
+                match arg.as_str() {
+                    "replication" => {
+                        BulkString(format!("role:{role}", role=self.cfg.role().to_string()).as_str().into())
+                    },
+                    _ => NullBulkString
+                }
+            }
+            /* _ => {
                     // SimpleError(format!("Cannot handle cmd yet: {cmd:?}"))
                     panic!("Cannot handle cmd yet: {cmd:?}")
               } */
