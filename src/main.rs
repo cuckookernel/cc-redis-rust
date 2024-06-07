@@ -1,5 +1,6 @@
 // Uncomment this block to pass the first stage
 
+use std::env::args;
 use anyhow::Result;
 use mpsc::{Receiver, Sender};
 use std::error::Error;
@@ -20,8 +21,38 @@ use debug_util::{self as dbgu, peer_addr_str};
 
 type CmdAndSender = (Command, Sender<resp::Value>);
 
+
+struct InstanceConfig {
+    port: u32
+}
+
+impl Default for InstanceConfig {
+    fn default() -> Self {
+        InstanceConfig{port:6379}
+    }
+}
+
+impl InstanceConfig {
+    fn from_command_args() -> Self {
+        let mut output = InstanceConfig{port: 6379};
+        let args = args().into_iter().collect::<Vec<_>>();
+        args.iter().enumerate().for_each( |(i, arg)| {
+            match arg.as_str() {
+                "--port" => output.port = args[i + 1].parse::<u32>().unwrap(),
+                _ => {}
+            }
+        });
+
+        output
+    }
+}
+
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let config = InstanceConfig::from_command_args();
+
+
     println!("Logs from your program will appear here!");
 
     // Channel for commands directed at Db
@@ -29,7 +60,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     tokio::spawn(async move { handle_db_commands(rx).await });
 
-    let listener = TcpListener::bind("127.0.0.1:6379").await?;
+    let listener = TcpListener::bind(format!("127.0.0.1:{port}", port=config.port)).await?;
     println!("\nOpened Listener");
     loop {
         match listener.accept().await {
