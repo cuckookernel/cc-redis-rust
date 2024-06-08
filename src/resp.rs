@@ -14,9 +14,20 @@ pub enum Value {
     Array(Vec<Value>),
     Int(i64),
     BulkString(Bytes),
+    FileContents(Bytes),
     SimpleError(String),
     BulkError(String),
 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QueryResult(pub Vec<Value>);
+
+impl From<Vec<Value>> for QueryResult {
+    fn from(v: Vec<Value>) -> Self {
+        QueryResult(v)
+    }
+}
+
 
 impl Value {
     pub fn ok() -> Self {
@@ -79,7 +90,19 @@ pub fn s_err(s: &str) -> Value {
 pub fn serialize(value: &Value) -> Result<Bytes> {
     let mut serializer = RespSerializer::default();
     serializer.serialize(value)?;
-    Ok(serializer.get().into())
+    // Ok(serializer.get().into())
+    Ok(serializer.writer.into_inner()?.into())
+}
+
+pub fn serialize_many(values: &[Value]) -> Result<Bytes> {
+    let mut serializer = RespSerializer::default();
+
+    for value in values {
+        serializer.serialize(value)?;
+    }
+
+    // Ok(serializer.get().into())
+    Ok(serializer.writer.into_inner()?.into())
 }
 
 pub struct RespSerializer {
@@ -122,6 +145,10 @@ impl RespSerializer {
                 cnt += self.write_len_line(b'$', v.len())?;
                 cnt += self.writeln(v.as_bytes())?
             }
+            FileContents(bs) => {
+                cnt += self.write_len_line(b'$', bs.len())?;
+                cnt += self.write(bs.as_bytes())?
+            }
             SimpleError(msg) => {
                 cnt += self.write(b"-")?;
                 cnt += self.writeln(msg.replace('\r', "\\r").replace('\n', "\\n").as_bytes())?
@@ -129,14 +156,20 @@ impl RespSerializer {
             BulkError(msg) => {
                 cnt += self.write_len_line(b'!', msg.len())?;
                 cnt += self.writeln(msg.as_bytes())?;
-            }
+            },
         };
         Ok(cnt)
     }
 
-    pub fn get(&self) -> &[u8] {
-        return self.writer.buffer();
+    /*
+    pub fn get(&mut self) -> &[u8] {
+        self.writer.buffer()
     }
+
+    pub fn into_vec(self) -> Vec<u8> {
+        let inner = self.writer.into_inner();
+        inner.unwrap()
+    }*/
 
     pub fn writeln(&mut self, data: &[u8]) -> io::Result<usize> {
         Ok(self.writer.write(data)? + self.writer.write(b"\r\n")?)

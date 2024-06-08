@@ -15,10 +15,10 @@ pub enum Command {
 }
 
 pub fn bad_num_of_arguments_err(cmd: &str, args: &[Value]) -> Result<Command> {
-    return Err(format_err!(
+    Err(format_err!(
         "Invalid number for arguments for `{cmd}`: {n}\nargs={args:?}",
         n = args.len()
-    ));
+    ))
 }
 
 impl Command {

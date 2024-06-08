@@ -2,6 +2,7 @@
 use anyhow::Result;
 
 use mpsc::{Receiver, Sender};
+use resp::{serialize_many, QueryResult, Value};
 use std::error::Error;
 use std::io;
 use tokio::net::{TcpListener, TcpStream};
@@ -14,13 +15,11 @@ mod db;
 mod misc_util;
 mod resp;
 
-use commands::{parse_cmd, Command};
+use commands::parse_cmd;
 use common::Bytes;
 use config::InstanceConfig;
-use db::Db;
+use db::{Db, CmdAndSender};
 use misc_util::peer_addr_str;
-
-type CmdAndSender = (Command, Sender<resp::Value>);
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -68,12 +67,10 @@ async fn handle_client(stream: &mut TcpStream, tx: Sender<CmdAndSender>) {
                     msg = format!("{:?}", Bytes::from(input_buffer.as_slice()))
                 );
 
-                let output_val = proc_input(&input_buffer, &tx).await;
+                let query_result: QueryResult = proc_input(&input_buffer, &tx).await;
+                let serialized = serialize_many(&query_result.0).unwrap();
 
-                let mut ser = resp::RespSerializer::new();
-                ser.serialize(&output_val).unwrap();
-
-                let write_result = stream.try_write(ser.get());
+                let write_result = stream.try_write(serialized.as_bytes());
                 if let Err(err) = write_result {
                     println!("handle_client: Error when writing: {err:?}");
                     return;
@@ -90,16 +87,16 @@ async fn handle_client(stream: &mut TcpStream, tx: Sender<CmdAndSender>) {
     }
 }
 
-async fn proc_input(input_buffer: &[u8], tx: &Sender<CmdAndSender>) -> resp::Value {
+async fn proc_input(input_buffer: &[u8], tx: &Sender<CmdAndSender>) -> QueryResult {
     let input_val = resp::deserialize(input_buffer);
     let output_res = match input_val {
         Ok(val) => cmd_to_db(&val, tx).await,
         Err(e) => Err(e),
     };
-    output_res.unwrap_or_else(|e| resp::Value::BulkError(e.to_string()))
+    output_res.unwrap_or_else(|e| vec![Value::BulkError(e.to_string())].into())
 }
 
-async fn cmd_to_db(input_val: &resp::Value, sender: &Sender<CmdAndSender>) -> Result<resp::Value> {
+async fn cmd_to_db(input_val: &resp::Value, sender: &Sender<CmdAndSender>) -> Result<QueryResult> {
     let cmd_res = parse_cmd(input_val);
     match cmd_res {
         Ok(cmd) => {

@@ -24,6 +24,11 @@ impl Bytes {
     pub fn to_string(&self) -> Result<String> {
         Ok(String::from_utf8(self.0.clone())?)
     }
+
+    #[allow(dead_code)]
+    pub fn into_inner(self) -> Vec<u8> {
+        self.0
+    }
 }
 
 /*

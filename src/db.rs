@@ -1,16 +1,20 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::Sender;
 
+use crate::misc_util::hex_decode;
+use crate::resp::QueryResult;
 use crate::commands::Command;
 use crate::config::InstanceConfig;
 use crate::misc_util::{make_replication_id, now_millis};
 use crate::resp::{get_value_from_stream, s_str, serialize, Value};
-use crate::{Bytes, CmdAndSender};
+use crate::common::Bytes;
+
+pub type CmdAndSender = (Command, Sender<QueryResult>);
 
 pub struct ValAndExpiry {
     val: Bytes,
@@ -91,19 +95,20 @@ impl Db {
         Ok(())
     }
 
-    pub fn execute(&mut self, cmd: &Command) -> Value {
+    pub fn execute(&mut self, cmd: &Command) -> QueryResult {
         use Command::*;
 
         match cmd {
-            Ping => s_str("PONG"),
-            Echo(a) => Value::BulkString(a.clone()),
-            SetKV(key, val, ex) => self.exec_set(key, val, ex),
-            Get(key) => self.exec_get(key),
-            Info(arg) => self.exec_info(arg),
-            ReplConf(_, _) => Value::ok(),
+            Ping => vec![s_str("PONG")].into(),
+            Echo(a) => vec![Value::BulkString(a.clone())].into(),
+            SetKV(key, val, ex) => vec![self.exec_set(key, val, ex)].into(),
+            Get(key) => vec![self.exec_get(key)].into(),
+            Info(arg) => vec![self.exec_info(arg)].into(),
+            ReplConf(_, _) => vec![Value::ok()].into(),
             Psync(id, offset) if id == "?" && *offset == -1 => {
                 let reply_str = format!("FULLRESYNC {repl_id} 0", repl_id = self.replication_id);
-                s_str(&reply_str)
+                vec![s_str(&reply_str),
+                     Value::FileContents(get_empty_rdb_bytes().into())].into()
             }
             Psync(_, _) => {
                 panic!("Can't reply to {cmd:?} yet")
@@ -169,4 +174,10 @@ impl ProxyToMaster {
         self.stream.write_all(serialized.as_bytes()).await?;
         get_value_from_stream(&mut self.stream).await
     }
+}
+
+const EMPTY_RDB_FILE_HEX: &str = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
+
+fn get_empty_rdb_bytes() -> Vec<u8> {
+    hex_decode(EMPTY_RDB_FILE_HEX).unwrap()
 }
