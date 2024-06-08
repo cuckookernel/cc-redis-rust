@@ -60,7 +60,6 @@ impl From<Vec<Value>> for Value {
     }
 }
 
-#[allow(dead_code)]
 pub fn s_str(s: &str) -> Value {
     Value::SimpleString(s.into())
 }

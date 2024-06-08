@@ -9,7 +9,7 @@ use tokio::sync::mpsc::Receiver;
 use crate::commands::Command;
 use crate::config::InstanceConfig;
 use crate::misc_util::{make_replication_id, now_millis};
-use crate::resp::{get_value_from_stream, serialize, Value};
+use crate::resp::{get_value_from_stream, s_str, serialize, Value};
 use crate::{Bytes, CmdAndSender};
 
 pub struct ValAndExpiry {
@@ -95,7 +95,7 @@ impl Db {
         use Command::*;
 
         match cmd {
-            Ping => Value::SimpleString("PONG".into()),
+            Ping => s_str("PONG"),
             Echo(a) => Value::BulkString(a.clone()),
             SetKV(key, val, ex) => self.exec_set(key, val, ex),
             Get(key) => self.exec_get(key),
@@ -103,7 +103,7 @@ impl Db {
             ReplConf(_, _) => Value::ok(),
             Psync(id, offset) if id == "?" && *offset == -1 => {
                 let reply_str = format!("FULLRESYNC {repl_id} 0", repl_id = self.replication_id);
-                Value::SimpleString(reply_str.as_bytes().into())
+                s_str(&reply_str)
             }
             Psync(_, _) => {
                 panic!("Can't reply to {cmd:?} yet")
