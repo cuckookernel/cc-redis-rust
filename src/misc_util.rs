@@ -38,20 +38,20 @@ pub fn hex_decode(input: &str) -> Result<Vec<u8>, InvalidDigit> {
 
     for i in (0..n_bytes).step_by(2) {
         let digit0_val = hex_decode_1_digit(input_bytes[i])?;
-        let digit1_val = hex_decode_1_digit(input_bytes[i+1])?;
+        let digit1_val = hex_decode_1_digit(input_bytes[i + 1])?;
 
-        output.push( digit0_val * 16 + digit1_val)
+        output.push(digit0_val * 16 + digit1_val)
     }
 
     Ok(output)
 }
 
+#[inline]
 fn hex_decode_1_digit(digit: u8) -> Result<u8, InvalidDigit> {
     match digit {
         b'0'..=b'9' => Ok(digit - b'0'),
         b'a'..=b'f' => Ok((digit - b'a') + 10),
         b'A'..=b'B' => Ok((digit - b'A') + 10),
-        _ => Err(InvalidDigit)
+        _ => Err(InvalidDigit),
     }
-
 }

@@ -1,25 +1,22 @@
 // Uncomment this block to pass the first stage
 use anyhow::Result;
 
+use io_util::{handle_stream, ToDb};
 use mpsc::{Receiver, Sender};
-use resp::{serialize_many, QueryResult, Value};
 use std::error::Error;
-use std::io;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 
 mod commands;
 mod common;
 mod config;
 mod db;
+mod io_util;
 mod misc_util;
 mod resp;
 
-use commands::parse_cmd;
-use common::Bytes;
 use config::InstanceConfig;
-use db::{Db, CmdAndSender};
-use misc_util::peer_addr_str;
+use db::Db;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -30,84 +27,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("Logs from your program will appear here!");
 
     // Channel for commands directed at Db
-    let (tx, rx): (Sender<CmdAndSender>, Receiver<CmdAndSender>) = mpsc::channel(100);
+    let (tx, rx): (Sender<ToDb>, Receiver<ToDb>) = mpsc::channel(100);
 
     println!("main: Setting up Db object.");
     let db = Db::new(config);
-    tokio::spawn(async move { db.run(rx).await });
+    tokio::spawn(db.run(tx.clone(), rx));
 
     let listener = TcpListener::bind(format!("127.0.0.1:{port}")).await?;
     println!("\nOpened Listener");
     loop {
         match listener.accept().await {
-            Ok((mut stream, addr)) => {
+            Ok((stream, addr)) => {
                 println!("Accepted new client: {:?}", addr);
                 let tx1 = tx.clone();
-                tokio::spawn(async move { handle_client(&mut stream, tx1).await });
+                tokio::spawn(async move { handle_stream(stream, tx1, false).await });
             }
             Err(e) => println!("couldn't get client: {:?}", e),
-        }
-    }
-}
-
-async fn handle_client(stream: &mut TcpStream, tx: Sender<CmdAndSender>) {
-    loop {
-        stream.readable().await.unwrap();
-        let mut input_buffer = Vec::with_capacity(4096);
-
-        // Try to read data, this may still fail with `WouldBlock`
-        // if the readiness event is a false positive.
-        match stream.try_read_buf(&mut input_buffer) {
-            Ok(0) => break,
-            Ok(_) => {
-                println!(
-                    "handle_client: received input (from {addr}) {n_bytes} bytes:\n{msg:?}",
-                    addr = peer_addr_str(stream),
-                    n_bytes = input_buffer.len(),
-                    msg = format!("{:?}", Bytes::from(input_buffer.as_slice()))
-                );
-
-                let query_result: QueryResult = proc_input(&input_buffer, &tx).await;
-                let serialized = serialize_many(&query_result.0).unwrap();
-
-                let write_result = stream.try_write(serialized.as_bytes());
-                if let Err(err) = write_result {
-                    println!("handle_client: Error when writing: {err:?}");
-                    return;
-                }
-            }
-            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                continue;
-            }
-            Err(err) => {
-                println!("handle_client: Error when reading from buffer: {err:?}");
-                return; //  Err(e.into());
-            }
-        };
-    }
-}
-
-async fn proc_input(input_buffer: &[u8], tx: &Sender<CmdAndSender>) -> QueryResult {
-    let input_val = resp::deserialize(input_buffer);
-    let output_res = match input_val {
-        Ok(val) => cmd_to_db(&val, tx).await,
-        Err(e) => Err(e),
-    };
-    output_res.unwrap_or_else(|e| vec![Value::BulkError(e.to_string())].into())
-}
-
-async fn cmd_to_db(input_val: &resp::Value, sender: &Sender<CmdAndSender>) -> Result<QueryResult> {
-    let cmd_res = parse_cmd(input_val);
-    match cmd_res {
-        Ok(cmd) => {
-            println!("Command parsed: {cmd:?}");
-            let (val_s, mut val_r) = mpsc::channel(1);
-            sender.send((cmd, val_s)).await?;
-            Ok(val_r.recv().await.unwrap())
-        }
-        Err(e) => {
-            panic!("parse_cmd failed: {e}");
-            // Err(anyhow::format_err!("parse_cmd failed: {e}")),
         }
     }
 }

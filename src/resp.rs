@@ -20,14 +20,19 @@ pub enum Value {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct QueryResult(pub Vec<Value>);
+pub struct QueryResult {
+    pub vals: Vec<Value>,
+    pub pass_stream: bool,
+}
 
 impl From<Vec<Value>> for QueryResult {
     fn from(v: Vec<Value>) -> Self {
-        QueryResult(v)
+        QueryResult {
+            vals: v,
+            pass_stream: false,
+        }
     }
 }
-
 
 impl Value {
     pub fn ok() -> Self {
@@ -80,7 +85,6 @@ pub fn b_str(s: &str) -> Value {
     Value::BulkString(s.into())
 }
 
-#[allow(dead_code)]
 pub fn s_err(s: &str) -> Value {
     Value::SimpleError(s.to_string())
 }
@@ -156,7 +160,7 @@ impl RespSerializer {
             BulkError(msg) => {
                 cnt += self.write_len_line(b'!', msg.len())?;
                 cnt += self.writeln(msg.as_bytes())?;
-            },
+            }
         };
         Ok(cnt)
     }
