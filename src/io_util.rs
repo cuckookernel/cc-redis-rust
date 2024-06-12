@@ -55,7 +55,7 @@ pub async fn handle_stream_async(
 ) {
     println!("Starting handle_stream_async(replication={is_replication})\n");
 
-    let mut eof_cnt = 0usize;
+    let mut _eof_cnt = 0usize;
 
     // debug_peek(format!("before loop (replication={is_replication})").as_str(), &bstream, 64).await;
     loop {
@@ -102,7 +102,7 @@ pub async fn handle_stream_async(
             Err(err) => {
                 if let Some(io_err) = err.downcast_ref::<io::Error>() {
                     if io_err.kind() == io::ErrorKind::UnexpectedEof {
-                        eof_cnt += 1;
+                        _eof_cnt += 1;
                     }
                 } else {
                     println!("EERRRORR: Failed to deserialize value. err:{err:?}");
