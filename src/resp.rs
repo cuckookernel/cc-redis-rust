@@ -1,11 +1,8 @@
 use anyhow::{format_err, Result};
 use std::io;
-use std::io::{BufReader, BufWriter, Cursor, Read, Write};
-use tokio::io::AsyncReadExt;
-use tokio::net::TcpStream;
+use std::io::{BufWriter, Write};
 
 use crate::common::Bytes;
-use crate::misc_util::peer_addr_str;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Value {
@@ -85,6 +82,7 @@ pub fn b_str(s: &str) -> Value {
     Value::BulkString(s.into())
 }
 
+#[allow(dead_code)]
 pub fn s_err(s: &str) -> Value {
     Value::SimpleError(s.to_string())
 }
@@ -165,16 +163,6 @@ impl RespSerializer {
         Ok(cnt)
     }
 
-    /*
-    pub fn get(&mut self) -> &[u8] {
-        self.writer.buffer()
-    }
-
-    pub fn into_vec(self) -> Vec<u8> {
-        let inner = self.writer.into_inner();
-        inner.unwrap()
-    }*/
-
     pub fn writeln(&mut self, data: &[u8]) -> io::Result<usize> {
         Ok(self.writer.write(data)? + self.writer.write(b"\r\n")?)
     }
@@ -195,79 +183,6 @@ impl Default for RespSerializer {
     }
 }
 
-pub struct RespDeserializer {
-    reader: BufReader<Cursor<Vec<u8>>>,
-}
-
-impl RespDeserializer {
-    pub fn new(v: Vec<u8>) -> Self {
-        Self {
-            reader: BufReader::new(Cursor::new(v)),
-        }
-    }
-
-    pub fn deserialize(&mut self) -> Result<Value> {
-        let mut bytes: Vec<u8> = Vec::with_capacity(64);
-
-        let one_byte = self.read_one_byte()?;
-        match one_byte {
-            b'+' => {
-                // SimpleString
-                self.read_until(b'\n', &mut bytes)?;
-                let len = bytes.len() - 2; // leave out "\r\n"
-                Ok(Value::SimpleString((&bytes[..len]).into()))
-            }
-            b':' => {
-                self.read_until(b'\n', &mut bytes)?;
-                let i = String::from_utf8(bytes)?.trim_end().parse::<i64>()?;
-                Ok(Value::Int(i))
-            }
-            b'$' => {
-                self.read_until(b'\n', &mut bytes)?;
-                let len = parse_len(&bytes)?;
-
-                let mut bytes_ = vec![0u8; len];
-                self.reader.read_exact(bytes_.as_mut_slice())?;
-                self.read_until(b'\n', &mut bytes)?;
-                Ok(Value::BulkString(bytes_.into()))
-            }
-            b'*' => {
-                self.read_until(b'\n', &mut bytes)?;
-                let array_len = parse_len(&bytes)?;
-
-                let mut elems: Vec<Value> = Vec::new();
-                for _ in 0..array_len {
-                    let elem = self.deserialize()?;
-                    elems.push(elem)
-                }
-                Ok(Value::Array(elems))
-            }
-            _ => Err(anyhow::format_err!("Invalid starting byte = {one_byte}")),
-        }
-    }
-
-    pub fn read_until(&mut self, c: u8, buf: &mut Vec<u8>) -> Result<usize> {
-        buf.clear();
-        let mut read: usize = 0;
-        loop {
-            let byte = self.read_one_byte()?;
-            read += 1;
-            buf.push(byte);
-            if byte == c {
-                break;
-            }
-        }
-
-        Ok(read)
-    }
-
-    pub fn read_one_byte(&mut self) -> Result<u8> {
-        let mut one_byte: [u8; 1] = [0u8; 1];
-        _ = self.reader.read(&mut one_byte)?;
-        Ok(one_byte[0])
-    }
-}
-
 pub fn parse_len(bytes: &[u8]) -> Result<usize> {
     String::from_utf8(Vec::from(bytes))?
         .trim_end()
@@ -279,31 +194,4 @@ pub fn parse_len(bytes: &[u8]) -> Result<usize> {
             );
             e.into()
         })
-}
-
-pub fn deserialize(data: &[u8]) -> Result<Value> {
-    let mut deser = RespDeserializer::new(Vec::from(data));
-    deser.deserialize().map_err(|err| {
-        format_err!(
-            "Error interpretting byte as Value bytes=`{bytes:?}`, err={err}",
-            bytes = Bytes::from(data)
-        )
-    })
-}
-
-pub async fn get_value_from_stream(stream: &mut TcpStream) -> Result<Value> {
-    stream.readable().await?;
-
-    let mut input_buffer = Vec::with_capacity(4096);
-    let bytes_read = stream.read_buf(&mut input_buffer).await?;
-
-    println!(
-        "get_value_from_stream: received (from {addr}) {n_bytes} (={bytes_read}?) bytes:\n{msg:?}",
-        addr = peer_addr_str(stream),
-        n_bytes = input_buffer.len(),
-        msg = format!("{:?}", Bytes::from(input_buffer.as_slice()))
-    );
-
-    let mut deser = RespDeserializer::new(input_buffer);
-    deser.deserialize()
 }

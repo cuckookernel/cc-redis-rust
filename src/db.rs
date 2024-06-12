@@ -2,21 +2,25 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use tokio::io::AsyncWriteExt;
+use tokio::io::BufStream;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
 
+use crate::async_deser::RespDeserializer;
 use crate::commands::Command;
 use crate::common::Bytes;
 use crate::config::InstanceConfig;
-use crate::io_util::handle_stream;
-use crate::io_util::Query;
-use crate::io_util::ToDb;
+// use crate::io_util::debug_peek;
+use crate::io_util::{handle_stream_async, Query, ToDb};
 use crate::misc_util::hex_decode;
-use crate::misc_util::peer_addr_str;
+// use crate::misc_util::peer_addr_str;
+use crate::async_deser::deserialize;
+use crate::misc_util::peer_addr_str_v2;
 use crate::misc_util::{make_replication_id, now_millis};
 use crate::resp::QueryResult;
-use crate::resp::{get_value_from_stream, s_str, serialize, Value};
+use crate::resp::{s_str, serialize, Value};
+// use crate::async_deser::receive_value_from_stream;
 
 pub struct ValAndExpiry {
     val: Bytes,
@@ -37,27 +41,7 @@ impl ValAndExpiry {
 
 struct ReplicaInfo {
     host_port: String,
-    stream: TcpStream,
-}
-
-impl ReplicaInfo {
-    /*
-    pub async fn attempt_connect(&mut self) -> Option<TcpStream> {
-        match self.stream.take() {
-            Some(strm) => Some(strm),
-            None => TcpStream::connect(self.host_port.as_str())
-                .await
-                .map_err(|e| {
-                    println!(
-                        "connection so to host_port: `{hp}` failed: {e:?}",
-                        hp = self.host_port
-                    );
-                    e
-                })
-                .map(Some)
-                .unwrap_or(None),
-        }
-    } */
+    bstream: BufStream<TcpStream>,
 }
 
 pub struct Db {
@@ -83,32 +67,36 @@ impl Db {
     pub async fn run(mut self, repl_tx: Sender<ToDb>, mut rx: Receiver<ToDb>) {
         // spawn replication coroutine
         if let Some(master_host_port) = self.cfg.replicaof.clone() {
-            println!("Db::run: running replication handshake");
-            let stream = self
-                .run_replication_handshake(&master_host_port)
-                .await
-                .unwrap();
+            let mut proxy = ProxyToMaster::new(master_host_port.as_str()).await;
 
-            tokio::spawn(handle_stream(stream, repl_tx, true));
+            println!("Db::run: running replication handshake");
+            self.run_replication_handshake(&mut proxy).await.unwrap();
+
+            println!("Db::run: replication handshake FINISHED");
+            let bstream = proxy.bstream;
+            tokio::spawn(handle_stream_async(bstream, repl_tx, true));
+            // handle_stream_async(stream, repl_tx, true).await
         }
 
         // long running co-routine that gets commands from only channel and executes them on the Db
-        println!("Db::run: Starting loop");
+        println!("Db::run: Starting Query Loop");
         loop {
             match rx.recv().await {
                 Some(ToDb::QueryAndSender(qry, sx)) => {
+                    println!("Query loop received query: {qry:?}");
                     let resp_val = self.execute(&qry).await;
                     sx.send(resp_val).await.unwrap()
                 }
-                Some(ToDb::PassedReplStream(stream)) => {
-                    let replica_addr = peer_addr_str(&stream).replace(' ', ":");
+                Some(ToDb::PassedReplStream(bstream)) => {
+                    let replica_addr = peer_addr_str_v2(&bstream).replace(' ', ":");
 
+                    println!("Query loop received ReplStream({replica_addr})");
                     if !self.replicas.contains_key(&replica_addr) {
                         self.replicas.insert(
                             replica_addr.clone(),
                             ReplicaInfo {
                                 host_port: replica_addr,
-                                stream,
+                                bstream,
                             },
                         );
                     }
@@ -121,9 +109,8 @@ impl Db {
         }
     }
 
-    pub async fn run_replication_handshake(&mut self, master_host_port: &str) -> Result<TcpStream> {
+    pub async fn run_replication_handshake(&mut self, proxy: &mut ProxyToMaster) -> Result<()> {
         // Run by replica side
-        let mut proxy = ProxyToMaster::new(master_host_port).await;
         let ping_resp = proxy.send_command(Command::Ping).await?;
         println!("master's response to ping: {ping_resp:?}");
 
@@ -134,12 +121,19 @@ impl Db {
         let repl_conf_2 = Command::ReplConf("capa".into(), "psync2".into());
         let repl_conf_2_resp = proxy.send_command(repl_conf_2).await?;
         println!("master's response to repl_conf_2: {repl_conf_2_resp:?}");
+        // debug_peek(&proxy.stream, 64).await;
 
         let psync = Command::Psync("?".into(), -1);
-        let psync_resp = proxy.send_command(psync).await?;
+        let psync_resp = proxy.send_command(psync).await.unwrap();
         println!("master's response to psync: {psync_resp:?}");
 
-        Ok(proxy.into_stream())
+        // debug_peek("Before getting rdb_file", &proxy.bstream, 64).await;
+        // waiting for RDBFILE now
+        let rdb_file = proxy.receive_file().await?;
+        println!("rdb_file received: {rdb_file:?}");
+
+        // handle_stream_async(proxy.bstream, repl_tx, true).await;
+        Ok(())
     }
 
     pub async fn execute(&mut self, query: &Query) -> QueryResult {
@@ -153,13 +147,14 @@ impl Db {
             Info(arg) => vec![self.exec_info(arg)],
             Psync(id, offset) if id == "?" && *offset == -1 => {
                 let reply_str = format!("FULLRESYNC {repl_id} 0", repl_id = self.replication_id);
-                return QueryResult{
+
+                return QueryResult {
                     vals: vec![
                         s_str(&reply_str),
                         Value::FileContents(get_empty_rdb_bytes().into()),
                     ],
-                    pass_stream: true
-                }
+                    pass_stream: true,
+                };
             }
             Psync(_, _) => {
                 panic!("Can't reply to {cmd:?} yet", cmd = query.cmd)
@@ -184,12 +179,16 @@ impl Db {
             for (repl_key, replica) in self.replicas.iter_mut() {
                 println!("attempting replication to: {repl_key}");
 
-                replica.stream.write_all(&bytes).await.unwrap_or_else(|e| {
+                replica.bstream.write_all(&bytes).await.unwrap_or_else(|e| {
                     println!(
                         "ERROR when attempting to replicate to {host_port}, err={e:?}",
                         host_port = replica.host_port
                     )
                 });
+
+                /* replica.bstream.flush().await.unwrap_or_else(|e| println!(
+                    "ERROR: when flushhing, err={e:?}"
+                )); */
             }
         }
 
@@ -206,7 +205,10 @@ impl Db {
                     Value::NullBulkString
                 }
             }
-            None => Value::NullBulkString,
+            None => {
+                println!("Key not found: `{key:?}`");
+                Value::NullBulkString
+            }
         }
     }
 
@@ -258,15 +260,15 @@ impl Db {
     }
 }
 
-struct ProxyToMaster {
-    stream: TcpStream,
+pub struct ProxyToMaster {
+    bstream: BufStream<TcpStream>,
 }
 
 impl ProxyToMaster {
     async fn new(master_host_port: &str) -> Self {
         let host_port = master_host_port.replace(' ', ":");
-        let stream = TcpStream::connect(host_port).await.unwrap();
-        Self { stream }
+        let bstream = BufStream::new(TcpStream::connect(host_port).await.unwrap());
+        Self { bstream }
     }
 
     async fn send_command(&mut self, cmd: Command) -> Result<Value> {
@@ -274,12 +276,23 @@ impl ProxyToMaster {
 
         let cmd_as_value = cmd.to_bulk_array();
         let serialized = serialize(&cmd_as_value)?;
-        self.stream.write_all(serialized.as_bytes()).await?;
-        get_value_from_stream(&mut self.stream).await
+        self.bstream.write_all(serialized.as_bytes()).await?;
+        self.bstream.flush().await?;
+
+        let val = deserialize(&mut self.bstream).await?;
+        Ok(val)
     }
 
-    fn into_stream(self) -> TcpStream {
-        self.stream
+    /* async fn receive_value(&mut self) -> Result<Value> {
+        let val = deserialize(&mut self.bstream).await?;
+        Ok(val)
+    } */
+
+    async fn receive_file(&mut self) -> Result<Value> {
+        let mut deser = RespDeserializer::from_reader(&mut self.bstream);
+
+        let val = deser.deserialize_file().await?;
+        Ok(val)
     }
 }
 

@@ -1,6 +1,6 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use tokio::net::TcpStream;
+use tokio::{io::BufStream, net::TcpStream};
 
 pub fn now_millis() -> u64 {
     SystemTime::now()
@@ -21,6 +21,14 @@ pub fn make_replication_id(seed: u64) -> String {
 
 pub fn peer_addr_str(stream: &TcpStream) -> String {
     stream
+        .peer_addr()
+        .map(|a| a.to_string())
+        .unwrap_or("<undefined>".to_string())
+}
+
+pub fn peer_addr_str_v2(stream: &BufStream<TcpStream>) -> String {
+    stream
+        .get_ref()
         .peer_addr()
         .map(|a| a.to_string())
         .unwrap_or("<undefined>".to_string())
