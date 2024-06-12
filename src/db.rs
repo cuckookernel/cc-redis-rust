@@ -86,7 +86,7 @@ impl Db {
         loop {
             match rx.recv().await {
                 Some(ToDb::QueryAndSender(qry, sx)) => {
-                    println!("Query loop received query: {qry:?}");
+                    println!("Query loop received: {qry:?}");
                     let resp_val = self.execute(&qry).await;
                     sx.send(resp_val).await.unwrap()
                 }
@@ -189,9 +189,9 @@ impl Db {
                     )
                 });
 
-                /* replica.bstream.flush().await.unwrap_or_else(|e| println!(
+                replica.bstream.flush().await.unwrap_or_else(|e| println!(
                     "ERROR: when flushhing, err={e:?}"
-                )); */
+                ));
             }
         }
 
