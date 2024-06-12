@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Duration;
 
 use anyhow::Result;
 use tokio::io::AsyncWriteExt;
@@ -77,6 +78,8 @@ impl Db {
             tokio::spawn(handle_stream_async(bstream, repl_tx, true));
             // handle_stream_async(stream, repl_tx, true).await
         }
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
 
         // long running co-routine that gets commands from only channel and executes them on the Db
         println!("Db::run: Starting Query Loop");
