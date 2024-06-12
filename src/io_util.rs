@@ -55,7 +55,7 @@ pub async fn handle_stream_async(
 ) {
     println!("Starting handle_stream_async(replication={is_replication})\n");
 
-    let mut eof_cnt: = 0usize;
+    let mut eof_cnt = 0usize;
 
     // debug_peek(format!("before loop (replication={is_replication})").as_str(), &bstream, 64).await;
     loop {
