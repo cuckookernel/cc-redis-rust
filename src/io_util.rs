@@ -55,8 +55,7 @@ pub async fn handle_stream_async(
 
     // debug_peek(format!("before loop (replication={is_replication})").as_str(), &bstream, 64).await;
     loop {
-        bstream.get_ref().readable().await.unwrap();
-
+        // bstream.get_ref().readable().await.unwrap();
         //let n_peeked = debug_peek("before process_input", &mut bstream, 1).await;
         // if n_peeked == 0 {
         //    tokio::time::sleep(Duration::from_millis(100)).await;
@@ -97,7 +96,7 @@ pub async fn handle_stream_async(
             }
             Err(err) => {
                 println!("EERRRORR: Failed to deserialize value. err:{err:?}");
-                tokio::time::sleep(Duration::from_millis(1)).await;
+                // tokio::time::sleep(Duration::from_millis(1)).await;
             }
         }
     }
