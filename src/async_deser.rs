@@ -53,6 +53,7 @@ impl<'a> RespDeserializer<'a> {
 
         Box::pin(async {
             // debug_peek("deserialize starts: ", self.bstream, 128).await;
+
             let first_byte = self.bstream.read_u8().await?;
             // println!("{addr}: first_byte:`{ch}`", addr=self.addr, ch=first_byte as char);
             match first_byte {

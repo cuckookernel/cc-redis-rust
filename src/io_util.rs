@@ -1,4 +1,6 @@
-use std::time::Duration;
+// use std::time::Duration;
+
+use std::io;
 
 use anyhow::Result;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufStream};
@@ -53,6 +55,8 @@ pub async fn handle_stream_async(
 ) {
     println!("Starting handle_stream_async(replication={is_replication})\n");
 
+    let mut eof_cnt: = 0usize;
+
     // debug_peek(format!("before loop (replication={is_replication})").as_str(), &bstream, 64).await;
     loop {
         // bstream.get_ref().readable().await.unwrap();
@@ -63,6 +67,7 @@ pub async fn handle_stream_async(
         // }
 
         let deser_res = async_deser::deserialize(&mut bstream).await;
+
         match deser_res {
             Ok(input_value) => {
                 let addr = peer_addr_str(bstream.get_ref());
@@ -95,7 +100,13 @@ pub async fn handle_stream_async(
                 }
             }
             Err(err) => {
-                println!("EERRRORR: Failed to deserialize value. err:{err:?}");
+                if let Some(io_err) = err.downcast_ref::<io::Error>() {
+                    if io_err.kind() == io::ErrorKind::UnexpectedEof {
+                        eof_cnt += 1;
+                    }
+                } else {
+                    println!("EERRRORR: Failed to deserialize value. err:{err:?}");
+                }
                 // tokio::time::sleep(Duration::from_millis(1)).await;
             }
         }
