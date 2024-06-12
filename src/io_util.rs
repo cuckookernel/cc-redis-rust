@@ -96,11 +96,13 @@ pub async fn handle_stream_async(
                 }
             }
             Err(err) => {
-                println!("Failed to deserialize value. err:{err:?}");
+                println!("EERRRORR: Failed to deserialize value. err:{err:?}");
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
         }
     }
+
+    println!("END of handle_stream_async(replication={is_replication})\n");
 }
 
 async fn process_input_async(
