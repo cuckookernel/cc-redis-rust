@@ -97,7 +97,7 @@ pub async fn handle_stream_async(
             }
             Err(err) => {
                 println!("EERRRORR: Failed to deserialize value. err:{err:?}");
-                tokio::time::sleep(Duration::from_millis(100)).await;
+                tokio::time::sleep(Duration::from_millis(10)).await;
             }
         }
     }
