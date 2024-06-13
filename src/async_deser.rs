@@ -57,17 +57,17 @@ impl<'a> RespDeserializer<'a> {
             let first_byte = self.bstream.read_u8().await?;
             // println!("{addr}: first_byte:`{ch}`", addr=self.addr, ch=first_byte as char);
             let mut deser_byte_cnt = 1;
-            match first_byte {
+            let result = match first_byte {
                 b'+' => {
                     // SimpleString
                     deser_byte_cnt += self.bstream.read_until(LF, &mut bytes).await?;
                     let len = bytes.len() - 2; // leave out "\r\n"
-                    Ok((Value::SimpleString((&bytes[..len]).into()), deser_byte_cnt, self))
+                    (Value::SimpleString((&bytes[..len]).into()), deser_byte_cnt, self)
                 }
                 b':' => {
                     deser_byte_cnt += self.bstream.read_until(LF, &mut bytes).await?;
                     let i = String::from_utf8(bytes)?.trim_end().parse::<i64>()?;
-                    Ok((Value::Int(i), deser_byte_cnt, self))
+                    (Value::Int(i), deser_byte_cnt, self)
                 }
                 b'$' => {
                     deser_byte_cnt += self.bstream.read_until(LF, &mut bytes).await?;
@@ -80,10 +80,10 @@ impl<'a> RespDeserializer<'a> {
                     // debug_peek("PEEEEKING:", self.bstream, 128).await;
                     deser_byte_cnt += self.bstream.read_until(LF, &mut bytes).await?;
 
-                    Ok((Value::BulkString(bytes_.into()), deser_byte_cnt, self))
+                    Value::BulkString(bytes_.into()), deser_byte_cnt, self)
                 }
                 b'*' => {
-                    self.bstream.read_until(LF, &mut bytes).await?;
+                    deser_byte_cnt += self.bstream.read_until(LF, &mut bytes).await?;
                     let array_len = parse_len(&bytes)?;
 
                     let mut elems: Vec<Value> = Vec::new();
@@ -95,12 +95,15 @@ impl<'a> RespDeserializer<'a> {
                         elems.push(elem);
                         // println!("elems has: {n}: {elems:?}", n=elems.len());
                     }
-                    Ok((Value::Array(elems), deser_byte_cnt, self))
+                    (Value::Array(elems), deser_byte_cnt, self)
                 }
                 _ => Err(anyhow::format_err!(
                     "Invalid starting byte = `{first_byte}`"
                 )),
-            }
+            }; // match
+
+            println!("deser: RESULT  deser_byte_cnt={deser_byte_cnt}");
+            Ok(result)
         })
     }
 }
