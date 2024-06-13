@@ -23,17 +23,17 @@ pub struct QueryResult {
     pub repl_byte_cnt_inc: usize,
 }
 
+/*
 impl QueryResult {
     fn new(vals: Vec<Value>, repl_byte_cnt_inc: usize) -> Self {
         QueryResult {
-            vals: v,
+            vals,
             repl_byte_cnt_inc,
             pass_stream: false,
         }
     }
 }
 
-/*
 impl From<Vec<Value>> for QueryResult {
     fn from(v: Vec<Value>) -> Self {
         QueryResult {
