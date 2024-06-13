@@ -48,6 +48,8 @@ struct ReplicaInfo {
 pub struct Db {
     h: HashMap<Bytes, ValAndExpiry>,
     cfg: InstanceConfig,
+    // Used by replicas
+    repl_byte_cnt: usize,
     // Used by Master
     replicas: HashMap<String, ReplicaInfo>,
     replication_id: String,
@@ -59,6 +61,7 @@ impl Db {
         Db {
             h: HashMap::new(),
             cfg,
+            repl_byte_cnt: 0,
             replicas: HashMap::new(),
             replication_id: make_replication_id(now_millis()),
             replication_offset: 0,
@@ -141,6 +144,8 @@ impl Db {
 
     pub async fn execute(&mut self, query: &Query) -> QueryResult {
         use Command::*;
+
+        self.repl_byte_cnt += query.deser_byte_cnt;
 
         let result: Vec<Value> = match &query.cmd {
             Ping => vec![s_str("PONG")],
@@ -267,7 +272,8 @@ impl Db {
         }
     }
     fn exec_repl_conf_get_ack(&mut self) -> Value {
-        vec!["REPLCONF".into(), "ACK".into(), "0".into()].into()
+        let repl_byte_cnt_str = self.repl_byte_cnt.to_string();
+        vec!["REPLCONF".into(), "ACK".into(), repl_byte_cnt_str.as_str().into()].into()
     }
 }
 
@@ -290,7 +296,7 @@ impl ProxyToMaster {
         self.bstream.write_all(serialized.as_bytes()).await?;
         self.bstream.flush().await?;
 
-        let val = deserialize(&mut self.bstream).await?;
+        let (val, _) = deserialize(&mut self.bstream).await?;
         Ok(val)
     }
 

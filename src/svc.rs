@@ -29,18 +29,20 @@ pub struct ClientInfo {
 #[derive(Debug)]
 pub struct Query {
     pub cmd: Command,
+    pub deser_byte_cnt: usize,
     // pub is_repl_update: bool,
     pub client_info: ClientInfo,
 }
 
 impl Query {
-    pub fn new(cmd: Command, /* is_repl_update: bool, */ addr: String) -> Self {
+    pub fn new(cmd: Command, deser_byte_cnt: usize, /* is_repl_update: bool, */ addr: String) -> Self {
         // let addr = peer_addr_str(stream);
 
         #[allow(clippy::single_char_pattern)]
         let addr_parts: Vec<&str> = addr.split(":").collect();
         Query {
             cmd,
+            deser_byte_cnt,
             // is_repl_update,
             client_info: ClientInfo {
                 host: addr_parts[0].to_string(),
@@ -72,13 +74,13 @@ pub async fn handle_stream_async(
         let deser_res = async_deser::deserialize(&mut bstream).await;
 
         match deser_res {
-            Ok(input_value) => {
+            Ok((input_value, deser_byte_cnt)) => {
                 let addr = peer_addr_str_v2(&bstream);
                 println!(
                     "handle_stream_async(replication={is_replication}): processing_input from:{addr}, value: {input_value:?}"
                 );
 
-                let query_result: QueryResult = process_input_async(input_value, addr, &tx).await;
+                let query_result: QueryResult = process_input_async(input_value, deser_byte_cnt, addr, &tx).await;
 
                 // Send result, but NOT if we are in replica mode
                 if should_reply(is_replication, &query_result) {
@@ -107,13 +109,14 @@ pub async fn handle_stream_async(
 
 async fn process_input_async(
     input_val: resp::Value,
+    deser_byte_cnt: usize,
     addr: String,
     // bstream: &mut BufStream<TcpStream>,
     send_to_db: &Sender<ToDb>,
 ) -> QueryResult {
     // debug_peek("before calling deserialize", &mut bstream, 64).await;
 
-    let query = make_query(&input_val, addr).await.unwrap();
+    let query = make_query(&input_val, deser_byte_cnt, addr).await.unwrap();
     let (val_s, mut val_r) = mpsc::channel(1);
 
     send_to_db
@@ -126,12 +129,12 @@ async fn process_input_async(
     output_res
 }
 
-async fn make_query(input_val: &resp::Value, addr: String) -> Result<Query> {
+async fn make_query(input_val: &resp::Value, deser_byte_cnt: usize,  addr: String) -> Result<Query> {
     let cmd_res = parse_cmd(input_val);
     match cmd_res {
         Ok(cmd) => {
             println!("Command parsed: {cmd:?} (from: {addr})", addr = addr);
-            let query = Query::new(cmd, addr);
+            let query = Query::new(cmd, deser_byte_cnt, addr);
             Ok(query)
         }
         Err(e) => {
