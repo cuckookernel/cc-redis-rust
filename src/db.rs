@@ -177,7 +177,7 @@ impl Db {
                 vec![self.exec_repl_conf_get_ack()]
             }
             Wait(n_repls, timeout) => {
-                vec![self.exec_wait(*n_repls as u64, *timeout as u64)]
+                vec![self.exec_wait(*n_repls as u64, *timeout as u64).await]
             }
         };
 
@@ -188,7 +188,7 @@ impl Db {
         }
     }
 
-    pub async fn exec_set(&mut self, key: &Bytes, val: &Bytes, ex: &Option<u64>) -> Value {
+    async fn exec_set(&mut self, key: &Bytes, val: &Bytes, ex: &Option<u64>) -> Value {
         self.h
             .insert(key.clone(), ValAndExpiry::new(val.clone(), *ex));
 
@@ -218,7 +218,7 @@ impl Db {
         Value::ok()
     }
 
-    pub fn exec_get(&self, key: &Bytes) -> Value {
+    fn exec_get(&self, key: &Bytes) -> Value {
         match self.h.get(key) {
             Some(val_ex) => {
                 if val_ex.ex > now_millis() {
@@ -235,7 +235,7 @@ impl Db {
         }
     }
 
-    pub fn exec_info(&self, arg: &str) -> Value {
+    fn exec_info(&self, arg: &str) -> Value {
         match arg {
             "replication" => {
                 let parts = [
@@ -286,8 +286,14 @@ impl Db {
         vec!["REPLCONF".into(), "ACK".into(), repl_byte_cnt_str.as_str().into()].into()
     }
 
-    fn exec_wait(&self, _n_repls: u64, _timeout: u64) -> Value {
-        Value::Int(self.replicas.len() as i64)
+    async fn exec_wait(&self, n_repls: u64, timeout: u64) -> Value {
+        let connected_reps = self.replicas.len() as i64;
+        if connected_reps >= n_repls as i64 {
+            Value::Int(connected_reps)
+        } else {
+            tokio::time::sleep(Duration::from_millis(timeout)).await;
+            Value::Int(connected_reps)
+        }
     }
 }
 
