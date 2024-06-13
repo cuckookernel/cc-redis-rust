@@ -196,6 +196,7 @@ impl Db {
             let cmd = Command::SetKV(key.clone(), val.clone(), *ex);
             let value = cmd.to_bulk_array();
             let bytes = serialize(&value).unwrap().into_inner();
+            self.replication_offset += bytes.len();
 
             for (repl_key, replica) in self.replicas.iter_mut() {
                 println!("attempting replication to: {repl_key}");
@@ -212,6 +213,20 @@ impl Db {
                     .flush()
                     .await
                     .unwrap_or_else(|e| println!("ERROR: when flushhing, err={e:?}"));
+            }
+
+            let get_ack_cmd = Command::ReplConfGetAck("*".to_string());
+            let cmd_bytes = serialize(&get_ack_cmd.to_bulk_array()).unwrap().into_inner();
+
+            for (repl_key, replica) in self.replicas.iter_mut() {
+                print!("requesting acks from replica: {repl_key}");
+
+                replica.bstream.write_all(&cmd_bytes).await.unwrap_or_else(|e| {
+                    println!(
+                        "ERROR when sending to replicate to {host_port}, err={e:?}",
+                        host_port = replica.host_port
+                    )
+                });
             }
         }
 
