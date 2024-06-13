@@ -11,6 +11,7 @@ pub enum Command {
     SetKV(Bytes, Bytes, Option<u64>),
     Info(String),
     ReplConf(String, String),
+    ReplConfGetAck(String),
     Psync(String, i64),
 }
 
@@ -45,6 +46,9 @@ impl Command {
             Self::ReplConf(key, val) => {
                 vec!["REPLCONF".into(), key.as_str().into(), val.as_str().into()].into()
             }
+            Self::ReplConfGetAck(arg) => {
+                vec!["REPLCONF".into(), "GETACK".into(), arg.as_str().into()].into()
+            }
             Self::Psync(key, val) => vec![
                 "PSYNC".into(),
                 key.as_str().into(),
@@ -69,10 +73,16 @@ pub fn parse_cmd(val: &Value) -> Result<Command> {
                     "GET" => parse_get(args),
                     "INFO" => parse_info(args),
                     "SET" => parse_set(args),
-                    "REPLCONF" => Ok(Command::ReplConf(
-                        args[0].try_to_string()?,
-                        args[1].try_to_string()?,
-                    )),
+                    "REPLCONF" => {
+                        let arg0 = args[0].try_to_string()?;
+                        let arg1 = args[1].try_to_string()?;
+
+                        Ok(if arg0 == "GETACK" {
+                            Command::ReplConfGetAck(arg1)
+                        } else {
+                            Command::ReplConf(arg0, arg1)
+                        })
+                    }
                     "PSYNC" => parse_psync(args),
                     _ => {
                         panic!("Don't know about command: `{word0}`")

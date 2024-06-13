@@ -1,14 +1,6 @@
 // Uncomment this block to pass the first stage
 use anyhow::Result;
 
-use io_util::{handle_stream_async, ToDb};
-use mpsc::{Receiver, Sender};
-use std::error::Error;
-use std::time::Duration;
-use tokio::io::BufStream;
-use tokio::net::TcpListener;
-use tokio::sync::mpsc;
-
 mod async_deser;
 mod commands;
 mod common;
@@ -17,17 +9,26 @@ mod db;
 mod io_util;
 mod misc_util;
 mod resp;
+mod svc;
 
 use config::InstanceConfig;
 use db::Db;
+use log::info;
+use mpsc::{Receiver, Sender};
+use std::error::Error;
+use std::time::Duration;
+use tokio::io::BufStream;
+use tokio::net::TcpListener;
+use tokio::sync::mpsc;
+use svc::ToDb;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let config = InstanceConfig::from_command_args();
-    println!("Config from args: {config:?}");
+    info!("Config from args: {config:?}");
     let port = config.port();
 
-    println!("Logs from your program will appear here!");
+    info!("Logs from your program will appear here!");
 
     // Channel for commands directed at Db
     let (tx, rx): (Sender<ToDb>, Receiver<ToDb>) = mpsc::channel(100);
@@ -45,7 +46,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 println!("Accepted new client (on {port}): peer={addr:?}");
                 let tx1 = tx.clone();
                 let bstream = BufStream::new(stream);
-                tokio::spawn(async move { handle_stream_async(bstream, tx1, false).await });
+                tokio::spawn(async move { svc::handle_stream_async(bstream, tx1, false).await });
             }
             Err(e) => println!("couldn't get client: {:?}", e),
         }

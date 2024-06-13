@@ -19,13 +19,6 @@ pub fn make_replication_id(seed: u64) -> String {
     String::from_utf8(replication_id.into()).unwrap()
 }
 
-pub fn peer_addr_str(stream: &TcpStream) -> String {
-    stream
-        .peer_addr()
-        .map(|a| a.to_string())
-        .unwrap_or("<undefined>".to_string())
-}
-
 pub fn peer_addr_str_v2(stream: &BufStream<TcpStream>) -> String {
     stream
         .get_ref()

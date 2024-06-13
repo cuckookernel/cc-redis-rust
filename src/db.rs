@@ -13,7 +13,7 @@ use crate::commands::Command;
 use crate::common::Bytes;
 use crate::config::InstanceConfig;
 // use crate::io_util::debug_peek;
-use crate::io_util::{handle_stream_async, Query, ToDb};
+use crate::svc::{handle_stream_async, Query, ToDb};
 use crate::misc_util::hex_decode;
 // use crate::misc_util::peer_addr_str;
 use crate::async_deser::deserialize;
@@ -165,6 +165,9 @@ impl Db {
             ReplConf(key, val) => {
                 vec![self.exec_repl_conf(key, val)]
             }
+            ReplConfGetAck(_) => {
+                vec![self.exec_repl_conf_get_ack()]
+            }
         };
 
         result.into()
@@ -189,9 +192,11 @@ impl Db {
                     )
                 });
 
-                replica.bstream.flush().await.unwrap_or_else(|e| println!(
-                    "ERROR: when flushhing, err={e:?}"
-                ));
+                replica
+                    .bstream
+                    .flush()
+                    .await
+                    .unwrap_or_else(|e| println!("ERROR: when flushhing, err={e:?}"));
             }
         }
 
@@ -260,6 +265,9 @@ impl Db {
             }
             _ => Value::BulkError(format!("Can't handle repl_conf key=`{key}`")),
         }
+    }
+    fn exec_repl_conf_get_ack(&mut self) -> Value {
+        vec!["REPLCONF".into(), "ACK".into(), "0".into()].into()
     }
 }
 
