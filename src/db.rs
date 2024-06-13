@@ -91,7 +91,9 @@ impl Db {
                 Some(ToDb::QueryAndSender(qry, sx)) => {
                     println!("Query loop received: {qry:?}");
                     let resp_val = self.execute(&qry).await;
-                    sx.send(resp_val).await.unwrap()
+                    let repl_byte_cnt_inc = resp_val.repl_byte_cnt_inc;
+                    sx.send(resp_val).await.unwrap();
+                    self.repl_byte_cnt += repl_byte_cnt_inc;
                 }
                 Some(ToDb::PassedReplStream(bstream)) => {
                     let replica_addr = peer_addr_str_v2(&bstream).replace(' ', ":");
@@ -145,7 +147,7 @@ impl Db {
     pub async fn execute(&mut self, query: &Query) -> QueryResult {
         use Command::*;
 
-        self.repl_byte_cnt += query.deser_byte_cnt;
+        // self.repl_byte_cnt += query.deser_byte_cnt;
 
         let result: Vec<Value> = match &query.cmd {
             Ping => vec![s_str("PONG")],
@@ -161,6 +163,7 @@ impl Db {
                         s_str(&reply_str),
                         Value::FileContents(get_empty_rdb_bytes().into()),
                     ],
+                    repl_byte_cnt_inc: 0,
                     pass_stream: true,
                 };
             }
@@ -175,7 +178,11 @@ impl Db {
             }
         };
 
-        result.into()
+        QueryResult {
+            vals: result,
+            repl_byte_cnt_inc: query.deser_byte_cnt,
+            pass_stream: false
+        }
     }
 
     pub async fn exec_set(&mut self, key: &Bytes, val: &Bytes, ex: &Option<u64>) -> Value {

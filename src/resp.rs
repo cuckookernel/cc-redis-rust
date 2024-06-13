@@ -20,8 +20,20 @@ pub enum Value {
 pub struct QueryResult {
     pub vals: Vec<Value>,
     pub pass_stream: bool,
+    pub repl_byte_cnt_inc: usize,
 }
 
+impl QueryResult {
+    fn new(vals: Vec<Value>, repl_byte_cnt_inc: usize) -> Self {
+        QueryResult {
+            vals: v,
+            repl_byte_cnt_inc,
+            pass_stream: false,
+        }
+    }
+}
+
+/*
 impl From<Vec<Value>> for QueryResult {
     fn from(v: Vec<Value>) -> Self {
         QueryResult {
@@ -29,7 +41,7 @@ impl From<Vec<Value>> for QueryResult {
             pass_stream: false,
         }
     }
-}
+}*/
 
 impl Value {
     pub fn ok() -> Self {
