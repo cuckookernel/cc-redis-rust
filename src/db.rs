@@ -176,6 +176,9 @@ impl Db {
             ReplConfGetAck(_) => {
                 vec![self.exec_repl_conf_get_ack()]
             }
+            Wait(_, _) => {
+                vec![Value::Int(0)]
+            }
         };
 
         QueryResult {

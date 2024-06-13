@@ -13,6 +13,7 @@ pub enum Command {
     ReplConf(String, String),
     ReplConfGetAck(String),
     Psync(String, i64),
+    Wait(i64, i64)
 }
 
 pub fn bad_num_of_arguments_err(cmd: &str, args: &[Value]) -> Result<Command> {
@@ -52,9 +53,15 @@ impl Command {
             Self::Psync(key, val) => vec![
                 "PSYNC".into(),
                 key.as_str().into(),
-                format!("{}", val).as_str().into(),
+                val.to_string().as_str().into(),
             ]
             .into(),
+            Self::Wait(n_repls, timeout) => vec![
+                "WAIT".into(),
+                n_repls.to_string().as_str().into(),
+                timeout.to_string().as_str().into()
+            ]
+            .into()
         }
     }
 }
@@ -84,6 +91,12 @@ pub fn parse_cmd(val: &Value) -> Result<Command> {
                         })
                     }
                     "PSYNC" => parse_psync(args),
+                    "WAIT" => {
+                        if args.len() != 2 {
+                            return Err(format_err!("Invalid number of arguments for WAIT {n}, {args:?}", n=args.len()))
+                        }
+                        Ok(Command::Wait(args[0].try_to_int()?, args[1].try_to_int()?))
+                    }
                     _ => {
                         panic!("Don't know about command: `{word0}`")
                     }

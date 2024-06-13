@@ -10,9 +10,9 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt};
 use tokio::{io::BufStream, net::TcpStream};
 
 pub async fn deserialize(bstream: &mut BufStream<TcpStream>) -> Result<(Value, usize)> {
-    let deser = RespDeserializer::from_reader(bstream);
+    let mut deser = RespDeserializer::from_reader(bstream);
 
-    let (val, deser_byte_cnt, _) = deser.deserialize().await?;
+    let (val, deser_byte_cnt) = deserialize_v1(&mut deser).await?;
     Ok((val, deser_byte_cnt))
 }
 
@@ -46,14 +46,14 @@ impl<'a> RespDeserializer<'a> {
         Ok(Value::FileContents(bytes_.into()))
     }
 
-    pub fn deserialize(
+    /*
+    pub fn deserialize_v0(
         mut self,
     ) -> Pin<Box<dyn Future<Output = Result<(Value, usize, Self)>> + Send + 'a>> {
         let mut bytes: Vec<u8> = Vec::with_capacity(64);
 
         Box::pin(async {
             // debug_peek("deserialize starts: ", self.bstream, 128).await;
-
             let first_byte = self.bstream.read_u8().await?;
             // println!("{addr}: first_byte:`{ch}`", addr=self.addr, ch=first_byte as char);
             let mut deser_byte_cnt = 1;
@@ -89,13 +89,13 @@ impl<'a> RespDeserializer<'a> {
                     let mut elems: Vec<Value> = Vec::new();
                     for _i in 0..array_len {
                         // debug_peek(format!("reading array elem: {i}").as_str(), &self.bstream, 16).await;
-                        let (elem, cnt_inc, deser_) = self.deserialize().await?;
+                        let (elem, cnt_inc, deser_) = self.deserialize_v0().await?;
                         deser_byte_cnt += cnt_inc;
                         self = deser_;
                         elems.push(elem);
                         // println!("elems has: {n}: {elems:?}", n=elems.len());
                     }
-                    Ok(((Value::Array(elems), deser_byte_cnt, self)))
+                    Ok((Value::Array(elems), deser_byte_cnt, self))
                 }
                 _ => Err(anyhow::format_err!(
                     "Invalid starting byte = `{first_byte}`"
@@ -106,5 +106,67 @@ impl<'a> RespDeserializer<'a> {
             output
         } // async
         ) // pin
-    }
+    } */
+}
+
+
+
+pub fn deserialize_v1<'a>(
+    me: &'a mut RespDeserializer,
+) -> Pin<Box<dyn Future<Output = Result<(Value, usize)>> + Send + 'a>> {
+    let mut bytes: Vec<u8> = Vec::with_capacity(64);
+
+    Box::pin(async {
+        // debug_peek("deserialize starts: ", self.bstream, 128).await;
+        let first_byte = me.bstream.read_u8().await?;
+        // println!("{addr}: first_byte:`{ch}`", addr=self.addr, ch=first_byte as char);
+        let mut deser_byte_cnt = 1;
+        let output = match first_byte {
+            b'+' => {
+                // SimpleString
+                deser_byte_cnt += me.bstream.read_until(LF, &mut bytes).await?;
+                let len = bytes.len() - 2; // leave out "\r\n"
+                Ok((Value::SimpleString((&bytes[..len]).into()), deser_byte_cnt))
+            }
+            b':' => {
+                deser_byte_cnt += me.bstream.read_until(LF, &mut bytes).await?;
+                let i = String::from_utf8(bytes)?.trim_end().parse::<i64>()?;
+                Ok((Value::Int(i), deser_byte_cnt))
+            }
+            b'$' => {
+                deser_byte_cnt += me.bstream.read_until(LF, &mut bytes).await?;
+                let len = parse_len(&bytes)?;
+                // println!("Reading bulkstring of length: {len}");
+
+                let mut bytes_ = vec![0u8; len];
+                // println!("After reading bulkstring: bytes_ has {n}", n=bytes_.len());
+                deser_byte_cnt += me.bstream.read_exact(bytes_.as_mut_slice()).await?;
+                // debug_peek("PEEEEKING:", self.bstream, 128).await;
+                deser_byte_cnt += me.bstream.read_until(LF, &mut bytes).await?;
+
+                Ok((Value::BulkString(bytes_.into()), deser_byte_cnt))
+            }
+            b'*' => {
+                deser_byte_cnt += me.bstream.read_until(LF, &mut bytes).await?;
+                let array_len = parse_len(&bytes)?;
+
+                let mut elems: Vec<Value> = Vec::new();
+                for _i in 0..array_len {
+                    // debug_peek(format!("reading array elem: {i}").as_str(), &self.bstream, 16).await;
+                    let (elem, cnt_inc) = deserialize_v1(me).await?;
+                    deser_byte_cnt += cnt_inc;
+                    elems.push(elem);
+                    // println!("elems has: {n}: {elems:?}", n=elems.len());
+                }
+                Ok((Value::Array(elems), deser_byte_cnt))
+            }
+            _ => Err(anyhow::format_err!(
+                "Invalid starting byte = `{first_byte}`"
+            )),
+        }; // match
+        // println!("deser: RESULT  deser_byte_cnt={deser_byte_cnt}");
+        // Ok(result)
+        output
+    } // async
+    ) // pin
 }

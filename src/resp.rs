@@ -43,19 +43,28 @@ impl From<Vec<Value>> for QueryResult {
     }
 }*/
 
+use Value::*;
+
 impl Value {
     pub fn ok() -> Self {
-        Self::SimpleString("OK".into())
+        SimpleString("OK".into())
     }
 
     pub fn try_to_string(&self) -> Result<String> {
         match self {
-            Self::NullBulkString => Ok("".into()),
-            Self::SimpleString(bs) => bs.to_string(),
-            Self::BulkString(bs) => bs.to_string(),
+            NullBulkString => Ok("".into()),
+            SimpleString(bs) => bs.to_string(),
+            BulkString(bs) => bs.to_string(),
             _ => Err(format_err!(
                 "Value is not convertable to string, self={self:?}"
             )),
+        }
+    }
+
+    pub fn try_to_int(&self) -> Result<i64> {
+        match self {
+            Int(i) => Ok(*i),
+            _ => self.try_to_string()?.parse::<i64>().map_err(|e| e.into())
         }
     }
 }
