@@ -176,8 +176,8 @@ impl Db {
             ReplConfGetAck(_) => {
                 vec![self.exec_repl_conf_get_ack()]
             }
-            Wait(_, _) => {
-                vec![Value::Int(0)]
+            Wait(n_repls, timeout) => {
+                vec![self.exec_wait(*n_repls as u64, *timeout as u64)]
             }
         };
 
@@ -284,6 +284,10 @@ impl Db {
     fn exec_repl_conf_get_ack(&mut self) -> Value {
         let repl_byte_cnt_str = self.repl_byte_cnt.to_string();
         vec!["REPLCONF".into(), "ACK".into(), repl_byte_cnt_str.as_str().into()].into()
+    }
+
+    fn exec_wait(&self, _n_repls: u64, _timeout: u64) -> Value {
+        Value::Int(self.replicas.len() as i64)
     }
 }
 
