@@ -5,5 +5,6 @@ pub mod config;
 pub mod db;
 pub mod io_util;
 pub mod misc_util;
+pub mod replica_handler;
 pub mod resp;
 pub mod svc;

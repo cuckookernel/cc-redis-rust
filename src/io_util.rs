@@ -5,9 +5,7 @@ use tokio::net::TcpStream;
 
 use crate::common::Bytes;
 
-
 pub async fn debug_peek(msg: &str, bstream: &mut BufStream<TcpStream>, n: usize) {
-
     let output = peek(bstream, n).await;
     println!("{msg} PEEKED ({n}): `{output:?}`", n = output.len());
 }

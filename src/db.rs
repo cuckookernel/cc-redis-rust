@@ -5,16 +5,18 @@ use anyhow::Result;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufStream;
 use tokio::net::TcpStream;
-use tokio::sync::mpsc::Receiver;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 use crate::async_deser::RespDeserializer;
 use crate::commands::Command;
 use crate::common::Bytes;
 use crate::config::InstanceConfig;
 // use crate::io_util::debug_peek;
-use crate::svc::{handle_stream_async, Query, ToDb};
 use crate::misc_util::hex_decode;
+use crate::replica_handler::handle_replica;
+use crate::svc::ClientInfo;
+use crate::svc::ToReplica;
+use crate::svc::{handle_stream_async, Query, ToDb};
 // use crate::misc_util::peer_addr_str;
 use crate::async_deser::deserialize;
 use crate::misc_util::peer_addr_str_v2;
@@ -40,27 +42,31 @@ impl ValAndExpiry {
     }
 }
 
+#[derive(Debug)]
 struct ReplicaInfo {
-    host_port: String,
-    bstream: BufStream<TcpStream>,
+    // host_port: String,
+    sender: Sender<ToReplica>,
+    acked_byte_cnt: u64,
 }
 
 pub struct Db {
     h: HashMap<Bytes, ValAndExpiry>,
     cfg: InstanceConfig,
+    tx: Sender<ToDb>,
     // Used by replicas
     repl_byte_cnt: usize,
     // Used by Master
     replicas: HashMap<String, ReplicaInfo>,
     replication_id: String,
-    replication_offset: usize,
+    replication_offset: u64,
 }
 
 impl Db {
-    pub fn new(cfg: InstanceConfig) -> Self {
+    pub fn new(cfg: InstanceConfig, tx: Sender<ToDb>) -> Self {
         Db {
             h: HashMap::new(),
             cfg,
+            tx,
             repl_byte_cnt: 0,
             replicas: HashMap::new(),
             replication_id: make_replication_id(now_millis()),
@@ -68,7 +74,7 @@ impl Db {
         }
     }
 
-    pub async fn run(mut self, repl_tx: Sender<ToDb>, mut rx: Receiver<ToDb>) {
+    pub async fn run(mut self, mut rx: Receiver<ToDb>) {
         // spawn replication coroutine
         if let Some(master_host_port) = self.cfg.replicaof.clone() {
             let mut proxy = ProxyToMaster::new(master_host_port.as_str()).await;
@@ -78,6 +84,7 @@ impl Db {
 
             println!("Db::run: replication handshake FINISHED");
             let bstream = proxy.bstream;
+            let repl_tx = self.tx.clone();
             tokio::spawn(handle_stream_async(bstream, repl_tx, true));
             // handle_stream_async(stream, repl_tx, true).await
         }
@@ -90,21 +97,32 @@ impl Db {
             match rx.recv().await {
                 Some(ToDb::QueryAndSender(qry, sx)) => {
                     println!("Query loop received: {qry:?}");
-                    let resp_val = self.execute(&qry).await;
+                    let sx1 = sx.clone();
+                    let resp_val = self.execute(&qry, sx1).await;
                     let repl_byte_cnt_inc = resp_val.repl_byte_cnt_inc;
-                    sx.send(resp_val).await.unwrap();
+                    if !resp_val.vals.is_empty() {
+                        sx.send(resp_val).await.unwrap();
+                    } else {
+                        println!("Not sending resp_val via channel as there are no values...");
+                    }
                     self.repl_byte_cnt += repl_byte_cnt_inc;
                 }
                 Some(ToDb::PassedReplStream(bstream)) => {
                     let replica_addr = peer_addr_str_v2(&bstream).replace(' ', ":");
 
                     println!("Query loop received ReplStream({replica_addr})");
+
+                    let (to_replica, repl_receiver) = channel::<ToReplica>(100);
+
+                    tokio::spawn(handle_replica(bstream, repl_receiver, self.tx.clone()));
+
                     if !self.replicas.contains_key(&replica_addr) {
                         self.replicas.insert(
                             replica_addr.clone(),
                             ReplicaInfo {
-                                host_port: replica_addr,
-                                bstream,
+                                // host_port: replica_addr,
+                                acked_byte_cnt: 0,
+                                sender: to_replica,
                             },
                         );
                     }
@@ -144,7 +162,7 @@ impl Db {
         Ok(())
     }
 
-    pub async fn execute(&mut self, query: &Query) -> QueryResult {
+    pub async fn execute(&mut self, query: &Query, sx1: Sender<QueryResult>) -> QueryResult {
         use Command::*;
 
         // self.repl_byte_cnt += query.deser_byte_cnt;
@@ -176,15 +194,30 @@ impl Db {
             ReplConfGetAck(_) => {
                 vec![self.exec_repl_conf_get_ack()]
             }
+            ReplConfAck(byte_cnt) => {
+                self.exec_repl_conf_ack(*byte_cnt as u64, &query.client_info);
+                vec![]
+            }
             Wait(n_repls, timeout) => {
-                vec![self.exec_wait(*n_repls as u64, *timeout as u64).await]
+                let maybe_val = self.exec_wait(*n_repls as usize, true, *timeout, query, sx1).await;
+                match maybe_val {
+                    Some(val) => vec![val],
+                    None => vec![],
+                }
+            }
+            WaitInternal(n_repls, timeout) => {
+                let maybe_val = self.exec_wait(*n_repls as usize, false, *timeout, query, sx1).await;
+                match maybe_val {
+                    Some(val) => vec![val],
+                    None => vec![],
+                }
             }
         };
 
         QueryResult {
             vals: result,
             repl_byte_cnt_inc: query.deser_byte_cnt,
-            pass_stream: false
+            pass_stream: false,
         }
     }
 
@@ -196,44 +229,27 @@ impl Db {
             let cmd = Command::SetKV(key.clone(), val.clone(), *ex);
             let value = cmd.to_bulk_array();
             let bytes = serialize(&value).unwrap().into_inner();
-            self.replication_offset += bytes.len();
+            self.replication_offset += bytes.len() as u64;
 
-            for (repl_key, replica) in self.replicas.iter_mut() {
-                println!("attempting replication to: {repl_key}");
+            println!("Db::exec_set: attempting replication to {n} replicas.", n=self.replicas.len());
 
-                replica.bstream.write_all(&bytes).await.unwrap_or_else(|e| {
-                    println!(
-                        "ERROR when attempting to replicate to {host_port}, err={e:?}",
-                        host_port = replica.host_port
-                    )
-                });
+            for (repl_key, replica) in self.replicas.iter() {
+                // send_bytes_to_replica(replica, &bytes, "attempting replication").await
 
-                replica
-                    .bstream
-                    .flush()
-                    .await
-                    .unwrap_or_else(|e| println!("ERROR: when flushing, err={e:?}"));
-            }
-
-            let get_ack_cmd = Command::ReplConfGetAck("*".to_string());
-            let cmd_bytes = serialize(&get_ack_cmd.to_bulk_array()).unwrap().into_inner();
-
-            for (repl_key, replica) in self.replicas.iter_mut() {
-                println!("requesting acks from replica: {repl_key}");
-
-                replica.bstream.write_all(&cmd_bytes).await.unwrap_or_else(|e| {
-                    println!(
-                        "ERROR when sending to replicate to {host_port}, err={e:?}",
-                        host_port = replica.host_port
-                    )
-                });
+                let msg_to_replica = ToReplica::Bytes(
+                    bytes.clone(),
+                    format!("attempting replication to {repl_key} -- {cmd:?}"),
+                );
 
                 replica
-                    .bstream
-                    .flush()
+                    .sender
+                    .send(msg_to_replica)
                     .await
-                    .unwrap_or_else(|e| println!("ERROR: when flushing, err={e:?}"));
+                    .unwrap_or_else(|e| {
+                        println!("Unable to send msg to replica via channel, e:{e:?} ")
+                    });
             }
+
         }
 
         Value::ok()
@@ -304,18 +320,97 @@ impl Db {
     }
     fn exec_repl_conf_get_ack(&mut self) -> Value {
         let repl_byte_cnt_str = self.repl_byte_cnt.to_string();
-        vec!["REPLCONF".into(), "ACK".into(), repl_byte_cnt_str.as_str().into()].into()
+        vec![
+            "REPLCONF".into(),
+            "ACK".into(),
+            repl_byte_cnt_str.as_str().into(),
+        ]
+        .into()
     }
 
-    async fn exec_wait(&self, n_repls: u64, timeout: u64) -> Value {
-        let connected_reps = self.replicas.len() as i64;
-        if connected_reps >= n_repls as i64 {
-            Value::Int(connected_reps)
+    fn exec_repl_conf_ack(&mut self, byte_cnt: u64, client_info: &ClientInfo) {
+        println!("!!! exec_repl_conf_ack: byte_cnt={byte_cnt} client_info={client_info:?}");
+        let repl_key = format!(
+            "{host}:{port}",
+            host = client_info.host,
+            port = client_info.port
+        );
+
+        let replica = self.replicas.get_mut(&repl_key);
+        if let Some(rep) = replica {
+            rep.acked_byte_cnt = byte_cnt;
         } else {
-            tokio::time::sleep(Duration::from_millis(timeout)).await;
-            Value::Int(connected_reps)
+            let valid_keys: Vec<&String> = self.replicas.keys().into_iter().collect();
+            println!("No replica for key=`{repl_key}`, valid keys are={valid_keys:?}")
         }
     }
+
+    async fn exec_wait(
+        &self,
+        n_repls: usize,
+        req_acks: bool,
+        timeout: i64,
+        qry: &Query,
+        rsx: Sender<QueryResult>,
+    ) -> Option<Value> {
+
+        if req_acks {
+            // Request acks from replicas
+            let get_ack_cmd = Command::ReplConfGetAck("*".to_string());
+            let cmd_bytes = serialize(&get_ack_cmd.to_bulk_array())
+                .unwrap()
+                .into_inner();
+
+            println!("Db::exec_set: requesting acks from {n} replicas", n=self.replicas.len());
+            for (_repl_key, replica) in self.replicas.iter() {
+                replica
+                    .sender
+                    .send(ToReplica::Bytes(
+                        cmd_bytes.clone(),
+                        "requesting getack".into(),
+                    ))
+                    .await
+                    .unwrap();
+            }
+        }
+
+        let acked_repl_cnt = self
+            .replicas
+            .iter()
+            .map(|(_rkey, ri)| {
+                /* println!(
+                    "rkey: {rkey} ri.acked_byte_cnt: {rac:?}  my_offset={o}",
+                    rac = ri.acked_byte_cnt,
+                    o = self.replication_offset
+                );*/
+                if ri.acked_byte_cnt >= self.replication_offset {
+                    1
+                } else {
+                    0
+                }
+            })
+            .sum::<usize>();
+
+        if acked_repl_cnt >= n_repls || timeout < 0 {
+            Some(Value::Int(acked_repl_cnt as i64))
+        } else {
+            let lapse = 100u64;
+            let new_cmd = Command::WaitInternal(n_repls as i64, timeout - (lapse as i64));
+            let mut new_qry = qry.clone();
+            new_qry.cmd = new_cmd;
+            let tx1 = self.tx.clone();
+            tokio::spawn(wait_again(lapse, new_qry, tx1, rsx));
+            None
+        }
+    }
+}
+
+async fn wait_again(for_millis: u64, new_qry: Query, tx: Sender<ToDb>, rsx: Sender<QueryResult>) {
+    let dur = Duration::from_millis(for_millis);
+    tokio::time::sleep(dur).await;
+
+    let to_db = ToDb::QueryAndSender(new_qry, rsx);
+    tx.send(to_db).await.unwrap()
 }
 
 pub struct ProxyToMaster {

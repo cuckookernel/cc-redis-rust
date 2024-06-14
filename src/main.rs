@@ -8,6 +8,7 @@ mod config;
 mod db;
 mod io_util;
 mod misc_util;
+mod replica_handler;
 mod resp;
 mod svc;
 
@@ -17,10 +18,10 @@ use log::info;
 use mpsc::{Receiver, Sender};
 use std::error::Error;
 use std::time::Duration;
+use svc::ToDb;
 use tokio::io::BufStream;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
-use svc::ToDb;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -34,8 +35,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let (tx, rx): (Sender<ToDb>, Receiver<ToDb>) = mpsc::channel(100);
 
     println!("main: Setting up Db object.");
-    let db = Db::new(config);
-    tokio::spawn(db.run(tx.clone(), rx));
+    let db = Db::new(config, tx.clone());
+    tokio::spawn(db.run(rx));
 
     tokio::time::sleep(Duration::from_millis(3000)).await;
     let listener = TcpListener::bind(format!("127.0.0.1:{port}")).await?;

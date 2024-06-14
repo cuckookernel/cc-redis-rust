@@ -3,7 +3,7 @@ use anyhow::{format_err, Result};
 use crate::common::Bytes;
 use crate::resp::{Value, Value::*};
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Command {
     Ping,
     Echo(Bytes),
@@ -12,8 +12,10 @@ pub enum Command {
     Info(String),
     ReplConf(String, String),
     ReplConfGetAck(String),
+    ReplConfAck(i64),
     Psync(String, i64),
-    Wait(i64, i64)
+    Wait(i64, i64),
+    WaitInternal(i64, i64),
 }
 
 pub fn bad_num_of_arguments_err(cmd: &str, args: &[Value]) -> Result<Command> {
@@ -47,6 +49,12 @@ impl Command {
             Self::ReplConf(key, val) => {
                 vec!["REPLCONF".into(), key.as_str().into(), val.as_str().into()].into()
             }
+            Self::ReplConfAck(val) => vec![
+                "REPLCONF".into(),
+                "GETACK".into(),
+                val.to_string().as_str().into(),
+            ]
+            .into(),
             Self::ReplConfGetAck(arg) => {
                 vec!["REPLCONF".into(), "GETACK".into(), arg.as_str().into()].into()
             }
@@ -59,9 +67,15 @@ impl Command {
             Self::Wait(n_repls, timeout) => vec![
                 "WAIT".into(),
                 n_repls.to_string().as_str().into(),
-                timeout.to_string().as_str().into()
+                timeout.to_string().as_str().into(),
             ]
-            .into()
+            .into(),
+            Self::WaitInternal(n_repls, timeout) => vec![
+                "WAIT_INTERNAL".into(),
+                n_repls.to_string().as_str().into(),
+                timeout.to_string().as_str().into(),
+            ]
+            .into(),
         }
     }
 }
@@ -86,6 +100,8 @@ pub fn parse_cmd(val: &Value) -> Result<Command> {
 
                         Ok(if arg0 == "GETACK" {
                             Command::ReplConfGetAck(arg1)
+                        } else if arg0 == "ACK" {
+                            Command::ReplConfAck(args[1].try_to_int()?)
                         } else {
                             Command::ReplConf(arg0, arg1)
                         })
@@ -93,7 +109,10 @@ pub fn parse_cmd(val: &Value) -> Result<Command> {
                     "PSYNC" => parse_psync(args),
                     "WAIT" => {
                         if args.len() != 2 {
-                            return Err(format_err!("Invalid number of arguments for WAIT {n}, {args:?}", n=args.len()))
+                            return Err(format_err!(
+                                "Invalid number of arguments for WAIT {n}, {args:?}",
+                                n = args.len()
+                            ));
                         }
                         Ok(Command::Wait(args[0].try_to_int()?, args[1].try_to_int()?))
                     }

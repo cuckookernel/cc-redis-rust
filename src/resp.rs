@@ -64,7 +64,7 @@ impl Value {
     pub fn try_to_int(&self) -> Result<i64> {
         match self {
             Int(i) => Ok(*i),
-            _ => self.try_to_string()?.parse::<i64>().map_err(|e| e.into())
+            _ => self.try_to_string()?.parse::<i64>().map_err(|e| e.into()),
         }
     }
 }
